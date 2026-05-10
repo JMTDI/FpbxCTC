@@ -1,0 +1,123 @@
+:root {
+  --bg:      #1a1d23;
+  --card:    #22262e;
+  --border:  #2e3340;
+  --accent:  #4f8ef7;
+  --green:   #3ecf6e;
+  --red:     #e05252;
+  --text:    #dde1ec;
+  --muted:   #7a8099;
+  --input-bg:#181b21;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  width: 340px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  font-size: 13px;
+}
+
+/* ── Header ─────────────────────────────────────────────────────────────── */
+header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 14px;
+}
+header img { flex-shrink: 0; }
+.header-title {
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--text);
+}
+.header-sub {
+  font-size: 11px;
+  color: var(--muted);
+  margin-left: auto;
+}
+
+/* ── Main ───────────────────────────────────────────────────────────────── */
+main {
+  padding: 16px 14px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+
+input[type=text],
+input[type=password] {
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text);
+  padding: 8px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  width: 100%;
+  transition: border-color .15s;
+}
+input:focus { border-color: var(--accent); }
+
+.hint {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* ── Save button ────────────────────────────────────────────────────────── */
+button#saveBtn {
+  margin-top: 4px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 5px;
+  padding: 9px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  width: 100%;
+  transition: opacity .15s;
+}
+button#saveBtn:hover { opacity: .85; }
+button#saveBtn:active { opacity: .7; }
+
+/* ── Status line ────────────────────────────────────────────────────────── */
+.status {
+  font-size: 12px;
+  min-height: 16px;
+  text-align: center;
+  color: var(--muted);
+}
+.status.ok  { color: var(--green); }
+.status.err { color: var(--red); }
+
+/* ── Footer ─────────────────────────────────────────────────────────────── */
+footer {
+  border-top: 1px solid var(--border);
+  padding: 8px 14px;
+  font-size: 11px;
+  color: var(--muted);
+  text-align: center;
+  line-height: 1.5;
+}
+footer strong { color: var(--text); }

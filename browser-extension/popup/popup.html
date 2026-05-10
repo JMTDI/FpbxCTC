@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FpbxCTC Settings</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <img src="../icons/icon32.png" alt="FpbxCTC" width="20" height="20">
+    <span class="header-title">FpbxCTC</span>
+    <span class="header-sub">FreePBX Click-to-Call</span>
+  </header>
+
+  <main>
+    <div class="field">
+      <label for="domain">Domain</label>
+      <input type="text" id="domain" placeholder="pbx.example.com" autocomplete="off" spellcheck="false">
+      <span class="hint">Without https://</span>
+    </div>
+
+    <div class="field">
+      <label for="apiKey">API Key</label>
+      <input type="password" id="apiKey" placeholder="ctc_sk_••••••••" autocomplete="off">
+    </div>
+
+    <div class="field">
+      <label for="agentNumber">Agent Number</label>
+      <input type="text" id="agentNumber" placeholder="1001" autocomplete="off" spellcheck="false">
+      <span class="hint">Your desk extension</span>
+    </div>
+
+    <button id="saveBtn">Save Settings</button>
+
+    <p id="status" class="status"></p>
+  </main>
+
+  <footer>
+    Right-click any selected number → <strong>Call with FpbxCTC</strong>
+  </footer>
+
+  <script src="popup.js"></script>
+</body>
+</html>

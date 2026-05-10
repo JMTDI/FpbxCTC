@@ -1,0 +1,35 @@
+# ── Compiled binaries ─────────────────────────────────────────────────────────
+*.exe
+*.exe~
+FpbxCTC-Setup.exe
+
+# ── Generated build artifacts ─────────────────────────────────────────────────
+# rsrc.syso is auto-generated from FpbxCTC.ico by the build scripts
+rsrc.syso
+# ICO is generated from FpbxCTC.png at build time
+FpbxCTC.ico
+# Browser extension icons are generated from FpbxCTC.png at build time
+browser-extension/icons/
+
+# ── Go toolchain cache / test output ──────────────────────────────────────────
+*.test
+*.out
+vendor/
+
+# ── Rust / Cargo ──────────────────────────────────────────────────────────────
+installer/target/
+installer/Cargo.lock
+
+# ── User config (stored in %APPDATA%, never in the repo) ──────────────────────
+config.json
+
+# ── OS clutter ────────────────────────────────────────────────────────────────
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# ── Editor / IDE ──────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
