@@ -10,6 +10,8 @@ rsrc.syso
 FpbxCTC.ico
 # Browser extension icons are generated from FpbxCTC.png at build time
 browser-extension/icons/
+# browser-extension.zip is generated at build time and embedded into FpbxCTC.exe
+browser-extension.zip
 
 # ── Go toolchain cache / test output ──────────────────────────────────────────
 *.test

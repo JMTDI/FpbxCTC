@@ -35,7 +35,7 @@ if %ERRORLEVEL% NEQ 0 (
 )
 
 :: ── Step 1: Convert FpbxCTC.png → FpbxCTC.ico ───────────────────────────────
-echo [1/6] Converting icon (PNG ^> ICO)...
+echo [1/7] Converting icon (PNG ^> ICO)...
 go run ./tools/mkico FpbxCTC.png FpbxCTC.ico
 if %ERRORLEVEL% NEQ 0 (
     echo ERROR: Icon conversion failed.
@@ -44,16 +44,25 @@ if %ERRORLEVEL% NEQ 0 (
 
 :: ── Step 2: Generate browser extension icons ─────────────────────────────────
 echo.
-echo [2/6] Generating browser extension icons...
+echo [2/7] Generating browser extension icons...
 go run ./tools/mkicons FpbxCTC.png browser-extension\icons
 if %ERRORLEVEL% NEQ 0 (
     echo ERROR: Browser icon generation failed.
     goto :fail
 )
 
-:: ── Step 3: Embed icon into EXE (creates rsrc.syso picked up by go build) ───
+:: ── Step 3: Bundle browser-extension/ → browser-extension.zip ───────────────
 echo.
-echo [3/6] Embedding icon in EXE...
+echo [3/7] Bundling browser extension into ZIP...
+go run ./tools/mkzip browser-extension browser-extension.zip
+if %ERRORLEVEL% NEQ 0 (
+    echo ERROR: Extension ZIP failed.
+    goto :fail
+)
+
+:: ── Step 4: Embed icon into EXE (creates rsrc.syso picked up by go build) ───
+echo.
+echo [4/7] Embedding icon in EXE...
 go run github.com/akavel/rsrc@latest -ico FpbxCTC.ico -o rsrc.syso
 if %ERRORLEVEL% NEQ 0 (
     echo ERROR: rsrc failed.
@@ -61,7 +70,7 @@ if %ERRORLEVEL% NEQ 0 (
 )
 
 echo.
-echo [4/6] Building FpbxCTC.exe ...
+echo [5/7] Building FpbxCTC.exe ...
 go build -ldflags "-H windowsgui -s -w" -o FpbxCTC.exe .
 if %ERRORLEVEL% NEQ 0 (
     echo ERROR: Go build failed.
@@ -69,7 +78,7 @@ if %ERRORLEVEL% NEQ 0 (
 )
 
 echo.
-echo [5/6] Copying files into installer folder ...
+echo [6/7] Copying files into installer folder ...
 copy /Y FpbxCTC.exe installer\FpbxCTC.exe >nul
 if %ERRORLEVEL% NEQ 0 (
     echo ERROR: Could not copy FpbxCTC.exe to installer\
@@ -82,7 +91,7 @@ if %ERRORLEVEL% NEQ 0 (
 )
 
 echo.
-echo [6/6] Building FpbxCTC-Setup.exe via installrs ...
+echo [7/7] Building FpbxCTC-Setup.exe via installrs ...
 installrs build installer --output FpbxCTC-Setup.exe
 if %ERRORLEVEL% NEQ 0 (
     echo ERROR: installrs build failed.

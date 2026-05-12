@@ -9,10 +9,10 @@ import (
 	"time"
 )
 
-var nonDigitRE = regexp.MustCompile(`[^\d+]`)
+var nonDigitRE = regexp.MustCompile(`[^\d]`)
 
 // sanitizeNumber strips the tel: prefix and removes every character that is
-// not a digit or a leading '+'.
+// not a digit (0-9). Handles formats like +1-555-123-4567, (555) 123.4567, etc.
 func sanitizeNumber(raw string) string {
 	s := raw
 	if idx := strings.Index(strings.ToLower(s), "tel:"); idx != -1 {
