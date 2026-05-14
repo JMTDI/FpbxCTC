@@ -1,4 +1,4 @@
-# FpbxCTC — FreePBX Click-to-Call for Windows
+# FpbxCTC — FreePBX Click-to-Call for Windows ![GitHub Downloads (latest release)](https://img.shields.io/github/downloads/JMTDI/FpbxCTC/latest/total)
 
 A lightweight Windows desktop app **and** browser extension that forward calls to a FreePBX-compatible PBX via its Click-to-Call REST API.
 
