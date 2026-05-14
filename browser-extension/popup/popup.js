@@ -2,36 +2,14 @@ const domainInput = document.getElementById('domain');
 const apiKeyInput = document.getElementById('apiKey');
 const agentInput  = document.getElementById('agentNumber');
 const saveBtn     = document.getElementById('saveBtn');
+const syncBtn     = document.getElementById('syncBtn');
 const statusEl    = document.getElementById('status');
 
-// ── Load saved settings, falling back to bootstrap.json if first install ──
+// ── Load saved settings on open ───────────────────────────────────────────
 chrome.storage.sync.get(['domain', 'apiKey', 'agentNumber'], (items) => {
-  if (items.domain || items.apiKey || items.agentNumber) {
-    // Already configured — use stored values
-    if (items.domain)      domainInput.value = items.domain;
-    if (items.apiKey)      apiKeyInput.value = items.apiKey;
-    if (items.agentNumber) agentInput.value  = items.agentNumber;
-  } else {
-    // First install — try bootstrap.json written by FpbxCTC.exe
-    fetch(chrome.runtime.getURL('bootstrap.json'))
-      .then((r) => r.ok ? r.json() : null)
-      .then((data) => {
-        if (!data) return;
-        const domain      = (data.domain       || '').trim();
-        const apiKey      = (data.api_key       || '').trim();
-        const agentNumber = (data.agent_number  || '').replace(/\D/g, '');
-        if (domain || apiKey || agentNumber) {
-          domainInput.value = domain;
-          apiKeyInput.value = apiKey;
-          agentInput.value  = agentNumber;
-          // Auto-save so subsequent opens use storage
-          chrome.storage.sync.set({ domain, apiKey, agentNumber });
-          setStatus('Settings loaded from desktop app ✓', 'ok');
-          setTimeout(() => setStatus(''), 4000);
-        }
-      })
-      .catch(() => {}); // bootstrap.json absent — fresh install, ignore
-  }
+  if (items.domain)      domainInput.value = items.domain;
+  if (items.apiKey)      apiKeyInput.value = items.apiKey;
+  if (items.agentNumber) agentInput.value  = items.agentNumber;
 });
 
 // ── Save on button click ──────────────────────────────────────────────────
@@ -65,3 +43,34 @@ function setStatus(msg, cls) {
   statusEl.textContent = msg;
   statusEl.className = 'status ' + (cls || '');
 }
+
+// ── Sync from Desktop App (Native Messaging) ──────────────────────────────
+syncBtn.addEventListener('click', () => {
+  setStatus('Syncing from desktop app…', '');
+  chrome.runtime.sendNativeMessage(
+    'com.fpbxctc.host',
+    { action: 'getConfig' },
+    (resp) => {
+      if (chrome.runtime.lastError) {
+        setStatus('Sync failed: ' + chrome.runtime.lastError.message, 'err');
+        return;
+      }
+      if (resp && resp.error) {
+        setStatus('Sync failed: ' + resp.error, 'err');
+        return;
+      }
+      if (resp.domain)      domainInput.value = resp.domain;
+      if (resp.apiKey)      apiKeyInput.value = resp.apiKey;
+      if (resp.agentNumber) agentInput.value  = resp.agentNumber;
+      // Auto-save the synced values
+      chrome.storage.sync.set({
+        domain:      resp.domain      || '',
+        apiKey:      resp.apiKey      || '',
+        agentNumber: resp.agentNumber || '',
+      }, () => {
+        setStatus('Synced from desktop app ✓', 'ok');
+        setTimeout(() => setStatus(''), 3000);
+      });
+    },
+  );
+});

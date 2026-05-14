@@ -2,6 +2,7 @@ use anyhow::Result;
 use installrs::gui::*;
 use installrs::{source, Installer};
 use mslnk::ShellLink;
+use std::process::Command;
 use winreg::enums::{HKEY_LOCAL_MACHINE, KEY_ALL_ACCESS};
 use winreg::RegKey;
 
@@ -29,7 +30,19 @@ pub fn install(i: &mut Installer) -> Result<()> {
             .status("Writing uninstaller...")
             .install()?;
 
-        // 3. Start Menu shortcut
+        // 3. Browser extension files
+        i.set_status("Installing browser extension...");
+        i.file(source!("browser-extension/manifest.json"),    r"browser-extension\manifest.json").install()?;
+        i.file(source!("browser-extension/background.js"),    r"browser-extension\background.js").install()?;
+        i.file(source!("browser-extension/icons/icon16.png"),  r"browser-extension\icons\icon16.png").install()?;
+        i.file(source!("browser-extension/icons/icon32.png"),  r"browser-extension\icons\icon32.png").install()?;
+        i.file(source!("browser-extension/icons/icon48.png"),  r"browser-extension\icons\icon48.png").install()?;
+        i.file(source!("browser-extension/icons/icon128.png"), r"browser-extension\icons\icon128.png").install()?;
+        i.file(source!("browser-extension/popup/popup.html"),  r"browser-extension\popup\popup.html").install()?;
+        i.file(source!("browser-extension/popup/popup.css"),   r"browser-extension\popup\popup.css").install()?;
+        i.file(source!("browser-extension/popup/popup.js"),    r"browser-extension\popup\popup.js").install()?;
+
+        // 5. Start Menu shortcut
         i.set_status("Creating Start Menu shortcut...");
         let programdata = std::env::var("PROGRAMDATA").unwrap_or_default();
         let shortcut_path = format!(
@@ -42,7 +55,7 @@ pub fn install(i: &mut Installer) -> Result<()> {
         lnk.set_icon_location(Some(exe_path.clone()));
         lnk.create_lnk(&shortcut_path)?;
 
-        // 4. Add / Remove Programs registry entry
+        // 6. Add / Remove Programs registry entry
         i.set_status("Registering with Add/Remove Programs...");
         let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
         let (key, _) = hklm.create_subkey_with_flags(UNINSTALL_REG, KEY_ALL_ACCESS)?;
@@ -57,6 +70,11 @@ pub fn install(i: &mut Installer) -> Result<()> {
         )?;
         key.set_value("NoModify", &1u32)?;
         key.set_value("NoRepair", &1u32)?;
+
+        // 7. Register tel: protocol + native messaging host (silent)
+        i.set_status("Registering tel: protocol and native messaging host...");
+        let exe_path = format!(r"{}\FpbxCTC.exe", INSTALL_DIR);
+        let _ = Command::new(&exe_path).arg("-register").output();
 
         Ok(())
     });
@@ -86,6 +104,12 @@ pub fn uninstall(i: &mut Installer) -> Result<()> {
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
     // Ignore error if key doesn't exist
     let _ = hklm.delete_subkey_all(UNINSTALL_REG);
+
+    // Unregister browser extension shortcuts and native messaging host
+    i.set_status("Unregistering browser extension...");
+    let exe_path = format!(r"{}\FpbxCTC.exe", INSTALL_DIR);
+    let _ = Command::new(&exe_path).arg("-uninstall-extension").output();
+    let _ = Command::new(&exe_path).arg("-unregister").output();
 
     // Remove the install directory
     i.remove(INSTALL_DIR).install()?;

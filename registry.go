@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -33,7 +34,8 @@ func deleteKeyTree(root registry.Key, path string) {
 }
 
 // RegisterProtocol writes all four registry sections that Windows needs to
-// list FpbxCTC in Settings → Default Apps → tel protocol.
+// list FpbxCTC in Settings → Default Apps → tel protocol, and also writes
+// the Native Messaging host manifest for Chrome and Edge.
 func RegisterProtocol() error {
 	exe, err := exePath()
 	if err != nil {
@@ -51,7 +53,10 @@ func RegisterProtocol() error {
 	if err := writeCapabilities(); err != nil {
 		return err
 	}
-	return writeRegisteredApp()
+	if err := writeRegisteredApp(); err != nil {
+		return err
+	}
+	return writeNativeMessagingHost(exe)
 }
 
 // writeProgID creates HKCU\Software\Classes\FpbxCTC.tel
@@ -176,5 +181,113 @@ func UnregisterProtocol() error {
 		ra.DeleteValue("FpbxCTC") //nolint:errcheck
 		ra.Close()
 	}
+	removeNativeMessagingHost()
 	return nil
+}
+
+// registerNMHostOnly writes the Native Messaging host manifest and registry
+// entries without touching the tel: protocol registration. Called from the
+// browser extension install flow so sync works immediately after install.
+func registerNMHostOnly() error {
+	exe, err := exePath()
+	if err != nil {
+		return fmt.Errorf("cannot determine exe path: %w", err)
+	}
+	return writeNativeMessagingHost(exe)
+}
+
+// ── Native Messaging Host ─────────────────────────────────────────────────────
+
+// nmHostName is the identifier used in the NM manifest and registry.
+const nmHostName = "com.fpbxctc.host"
+
+// nmExtensionID is the fixed Chrome/Edge extension ID derived from the
+// public key in manifest.json.
+const nmExtensionID = "chrome-extension://mbabhkdiiiceedngdpgbifgnabaaboeb/"
+
+type nmManifest struct {
+	Name           string   `json:"name"`
+	Description    string   `json:"description"`
+	Path           string   `json:"path"`
+	Type           string   `json:"type"`
+	AllowedOrigins []string `json:"allowed_origins"`
+}
+
+// nmInstalledExe returns the canonical installed exe path, using the
+// ProgramFiles environment variable so it adapts to non-default installs.
+func nmInstalledExe() string {
+	pf := os.Getenv("ProgramFiles")
+	if pf == "" {
+		pf = `C:\Program Files`
+	}
+	return filepath.Join(pf, "FpbxCTC", "FpbxCTC.exe")
+}
+
+func writeNativeMessagingHost(exeFullPath string) error {
+	// Always prefer the installed exe so that the NM host path is stable
+	// even when the user runs the dev build to reconfigure settings.
+	if installed := nmInstalledExe(); installed != "" {
+		if _, err := os.Stat(installed); err == nil {
+			exeFullPath = installed
+		}
+	}
+
+	manifest := nmManifest{
+		Name:           nmHostName,
+		Description:    "FpbxCTC native messaging host",
+		Path:           exeFullPath,
+		Type:           "stdio",
+		AllowedOrigins: []string{nmExtensionID},
+	}
+
+	// Write manifest JSON to %APPDATA%\FpbxCTC\
+	dir := filepath.Join(os.Getenv("APPDATA"), "FpbxCTC")
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return fmt.Errorf("nm mkdir: %w", err)
+	}
+	manifestPath := filepath.Join(dir, "fpbxctc_nm.json")
+	data, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(manifestPath, data, 0o644); err != nil {
+		return fmt.Errorf("nm write manifest: %w", err)
+	}
+
+	// Register for all Chromium-based browsers
+	for _, keyPath := range []string{
+		`SOFTWARE\Google\Chrome\NativeMessagingHosts\` + nmHostName,
+		`SOFTWARE\Microsoft\Edge\NativeMessagingHosts\` + nmHostName,
+		`SOFTWARE\BraveSoftware\Brave-Browser\NativeMessagingHosts\` + nmHostName,
+		`SOFTWARE\Vivaldi\NativeMessagingHosts\` + nmHostName,
+		`SOFTWARE\Chromium\NativeMessagingHosts\` + nmHostName,
+	} {
+		if err := writeNMRegistry(keyPath, manifestPath); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writeNMRegistry(keyPath, manifestPath string) error {
+	k, _, err := registry.CreateKey(registry.CURRENT_USER, keyPath, registry.ALL_ACCESS)
+	if err != nil {
+		return fmt.Errorf("nm registry %s: %w", keyPath, err)
+	}
+	defer k.Close()
+	return k.SetStringValue("", manifestPath)
+}
+
+func removeNativeMessagingHost() {
+	manifestPath := filepath.Join(os.Getenv("APPDATA"), "FpbxCTC", "fpbxctc_nm.json")
+	os.Remove(manifestPath) //nolint:errcheck
+	for _, keyPath := range []string{
+		`SOFTWARE\Google\Chrome\NativeMessagingHosts\` + nmHostName,
+		`SOFTWARE\Microsoft\Edge\NativeMessagingHosts\` + nmHostName,
+		`SOFTWARE\BraveSoftware\Brave-Browser\NativeMessagingHosts\` + nmHostName,
+		`SOFTWARE\Vivaldi\NativeMessagingHosts\` + nmHostName,
+		`SOFTWARE\Chromium\NativeMessagingHosts\` + nmHostName,
+	} {
+		deleteKeyTree(registry.CURRENT_USER, keyPath)
+	}
 }

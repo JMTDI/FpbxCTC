@@ -4,7 +4,9 @@
   "version": "1.0",
   "description": "FreePBX Click-to-Call — right-click any selected phone number to dial via your PBX.",
 
-  "permissions": ["contextMenus", "storage", "notifications"],
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA3tz1BXx0KJnI+MHWJjOHbxNBJMzzlGjPrGRrTQ4nV6+VC273xLkaQuQbMoRoQ+XZ5fBxWJ3hpHZJqI0PgDeH/YSa+vk23nGH4SV9Di4gmW01esbZZ2i4aT/7lnsPzOSkGQuPtAAyBILn4MwTZsDaDPW1C3BBUSs1V0ZhNJDSbKxsH8sIQ+4K1WEEjrLVx+rUxFnUAfy+aI2o/UvNPWnEUes9LItZwuvte0LDiOVz0hsJ+jjwVk+XFRz+9YuO5aUiLtSwePp9w5NMaD5+JFtT11cjuhiTh8XTa418DVcQmywMtw4RKrVhUcQinpZ9snTgVbVWIusqiGfWNI73oWxpmQIDAQAB",
+
+  "permissions": ["contextMenus", "storage", "notifications", "nativeMessaging"],
   "host_permissions": ["<all_urls>"],
 
   "background": {

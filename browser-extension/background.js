@@ -8,11 +8,12 @@ chrome.runtime.onInstalled.addListener(() => {
 });
 
 // ── Number sanitiser (mirrors caller.go logic) ────────────────────────────────
+// Strips tel: prefix then removes everything that is not a digit:
+// spaces, hyphens, dots, parentheses, plus signs → digits only.
 function sanitizeNumber(raw) {
   let s = raw.trim();
   const telIdx = s.toLowerCase().indexOf('tel:');
   if (telIdx !== -1) s = s.slice(telIdx + 4);
-  // Keep digits only
   return s.replace(/[^\d]/g, '');
 }
 

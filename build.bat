@@ -29,34 +29,25 @@ if %ERRORLEVEL% NEQ 0 (
 
 :: ── Step 2: Generate browser extension icons ─────────────────────────────────
 echo.
-echo [2/7] Generating browser extension icons...
+echo [2/6] Generating browser extension icons...
 go run ./tools/mkicons FpbxCTC.png browser-extension\icons
 if %ERRORLEVEL% NEQ 0 (
     echo ERROR: Browser icon generation failed.
     goto :fail
 )
 
-:: ── Step 3: Bundle browser-extension/ → browser-extension.zip ───────────────
+:: ── Step 3: Embed icon into EXE (creates rsrc.syso picked up by go build) ───
 echo.
-echo [3/7] Bundling browser extension into ZIP...
-go run ./tools/mkzip browser-extension browser-extension.zip
-if %ERRORLEVEL% NEQ 0 (
-    echo ERROR: Extension ZIP failed.
-    goto :fail
-)
-
-:: ── Step 4: Embed icon into EXE (creates rsrc.syso picked up by go build) ───
-echo.
-echo [4/7] Embedding icon in EXE...
+echo [3/6] Embedding icon in EXE...
 go run github.com/akavel/rsrc@latest -ico FpbxCTC.ico -o rsrc.syso
 if %ERRORLEVEL% NEQ 0 (
     echo ERROR: rsrc failed.
     goto :fail
 )
 
-:: ── Step 5: Tidy dependencies ────────────────────────────────────────────────
+:: ── Step 4: Tidy dependencies ────────────────────────────────────────────────
 echo.
-echo [5/7] Tidying dependencies...
+echo [4/6] Tidying dependencies...
 go mod tidy
 if %ERRORLEVEL% NEQ 0 (
     echo.
@@ -65,7 +56,7 @@ if %ERRORLEVEL% NEQ 0 (
 )
 
 echo.
-echo [6/7] Building FpbxCTC.exe ...
+echo [5/6] Building FpbxCTC.exe ...
 go build -ldflags "-H windowsgui -s -w" -o FpbxCTC.exe .
 if %ERRORLEVEL% NEQ 0 (
     echo.
@@ -74,7 +65,7 @@ if %ERRORLEVEL% NEQ 0 (
 )
 
 echo.
-echo [7/7] Done.
+echo [6/6] Done.
 echo.
 echo   Output : FpbxCTC.exe
 echo.
