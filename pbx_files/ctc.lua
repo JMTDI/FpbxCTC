@@ -4,20 +4,25 @@
 -- Usage  : fs_cli -x "luarun ctc.lua <agent_number> <dest_number>"
 -- Flow   :
 --   Phase 1 → Originate outbound call through gateway to AGENT
---             (dest is never touched until agent answers AND presses 1)
---   Phase 1b → Agent answers → hear prompt "Press 1 to connect your call"
---              If they press 1  → proceed to Phase 2
---              If no digit / wrong digit / voicemail → hang up, dest NEVER called
---   Phase 2 → Bridge to DESTINATION through same gateway
---             Agent hears US ringback while dest rings
+--             (dest is never touched until the agent actually answers)
+--   Phase 2 → Once the agent answers, immediately bridge to DESTINATION
+--             through the same gateway. Agent hears US ringback while
+--             dest rings. If the agent never answers within
+--             AGENT_ANSWER_TIMEOUT, the origination attempt is cancelled
+--             and dest is NEVER called.
 -- ─────────────────────────────────────────────────────────────────────────────
 
 -- ── Config ────────────────────────────────────────────────────────────────────
 local GATEWAY        = "YOUR-GATEWAY-UUID-HERE"  -- Sofia gateway UUID from FusionPBX → Accounts → Gateways
 local CID_NAME       = "Click-To-Call"
 local CID_NUMBER     = "15550000000"             -- Outbound caller ID number
-local ANSWER_TIMEOUT = 30     -- seconds to wait for agent to answer
-local DTMF_TIMEOUT   = 8      -- seconds to wait for agent to press 1
+-- Seconds to wait for the AGENT leg to answer before FreeSWITCH's
+-- originate_timeout cancels the attempt. Kept short (~3 rings) so the
+-- destination is never dialed once the agent's voicemail would pick up.
+-- Voicemail pickup timing varies by carrier/phone/extension — tune per deployment.
+local AGENT_ANSWER_TIMEOUT = 16
+-- Seconds to wait for the DESTINATION leg to answer (Phase 2 bridge).
+local DEST_ANSWER_TIMEOUT  = 30
 local LOG_PREFIX     = "[CTC] "
 
 -- ── Helpers ───────────────────────────────────────────────────────────────────
@@ -71,7 +76,7 @@ local agent_dial = string.format(
     "sofia/gateway/%s/%s",
     CID_NAME,
     CID_NUMBER,
-    ANSWER_TIMEOUT,
+    AGENT_ANSWER_TIMEOUT,
     GATEWAY,
     agent_number
 )
@@ -87,39 +92,13 @@ if not agent_session or not agent_session:ready() then
     return
 end
 
-log("Agent leg connected. Answering and playing confirm prompt.")
+log("Agent leg connected. Answering and bridging to destination.")
 
 -- Answer the agent leg so audio flows
 agent_session:answer()
 freeswitch.msleep(500)  -- small pause so audio path is stable
 
--- ── Phase 1b: DTMF gate — agent must press 1 ─────────────────────────────────
--- This is the key fix: voicemail picks up but will never press 1.
--- If agent rejects → we never reach here at all (no 200 OK).
--- Speak the prompt via TTS (flite is built into FreeSwitch)
-
-agent_session:execute("speak", "flite|kal|You have a click to call request. Press 1 to connect your call, or hang up to reject.")
-
--- Flush any stray DTMF then wait for digit
-agent_session:execute("flush_dtmf", "")
-
--- Collect one digit with DTMF_TIMEOUT second timeout
--- getDigits(max_digits, terminators, timeout_ms, flush)
-local digit = agent_session:getDigits(1, "#", DTMF_TIMEOUT * 1000)
-
-log("Agent digit received: '" .. (digit or "") .. "'")
-
-if digit ~= "1" then
-    log_err("Agent did not press 1 (got '" .. (digit or "none") .. "') — dest NOT called. Hanging up agent.")
-    if agent_session:ready() then
-        agent_session:execute("speak", "flite|kal|Call cancelled. Goodbye.")
-        freeswitch.msleep(1500)
-        agent_session:hangup("NORMAL_CLEARING")
-    end
-    return
-end
-
-log("Agent confirmed with 1. Now dialing destination: " .. dest_number)
+log("Agent answered. Now dialing destination: " .. dest_number)
 
 -- ── Phase 2: Bridge to DESTINATION ───────────────────────────────────────────
 -- Agent hears US ringback (buzz buzz) while destination rings
@@ -137,7 +116,7 @@ local dest_dial = string.format(
     "sofia/gateway/%s/%s",
     CID_NAME,
     CID_NUMBER,
-    ANSWER_TIMEOUT,
+    DEST_ANSWER_TIMEOUT,
     GATEWAY,
     dest_number
 )
