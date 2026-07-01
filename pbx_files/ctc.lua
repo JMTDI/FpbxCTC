@@ -37,9 +37,12 @@ local LOG_PREFIX     = "[CTC] "
 -- this same trunk, some carriers/SBCs will let the SIP signaling complete
 -- normally (200 OK on both legs) but silently withhold the RTP media path
 -- (a "connected but silent" call) because the outbound call looks like a
--- self-referential / spoofed call on that trunk. Forcing FreeSWITCH to be
--- the RTP anchor for both legs (bypass_media=false / proxy_media=false)
--- and re-timestamping audio (rtp_autofix_timing / rtp_rewrite_timestamps)
+-- self-referential / spoofed call on that trunk. bypass_media=false keeps
+-- FreeSWITCH fully in the RTP path (no direct media between the two SIP
+-- endpoints); proxy_media=false additionally prevents FreeSWITCH from
+-- re-negotiating a codec-passthrough shortcut, so audio is always
+-- transcoded/anchored through FreeSWITCH on both legs. Combined with
+-- re-timestamping audio (rtp_autofix_timing / rtp_rewrite_timestamps),
 -- maximizes the chance that audio still flows even when the carrier's own
 -- direct-media/early-media shortcuts are being blocked for this CID.
 -- This does NOT fix carrier/SBC-side call blocking or attestation
@@ -89,7 +92,7 @@ end
 -- (agent or dest), some carriers will reject or silently drop the call's
 -- media because it looks like the number is calling itself. Abort early
 -- with a clear error instead of producing a "connected but silent" call.
-local cid_digits = CID_NUMBER:gsub("%D", "")
+local cid_digits = (CID_NUMBER or ""):gsub("%D", "")
 if cid_digits == agent_number or cid_digits == dest_number then
     log_err("CID_NUMBER (" .. CID_NUMBER .. ") matches the number being dialed — " ..
             "this causes a self-referential call on the same trunk. Signaling " ..
