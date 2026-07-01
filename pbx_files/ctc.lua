@@ -3,8 +3,14 @@
 -- File   : /usr/share/freeswitch/scripts/ctc.lua
 -- Usage  : fs_cli -x "luarun ctc.lua <agent_number> <dest_number>"
 -- Flow   :
---   Phase 1 → Originate outbound call through gateway to AGENT
---             (dest is never touched until the agent actually answers)
+--   Phase 1 → Originate an outbound call through the external gateway to the
+--             AGENT's external number (e.g. cell phone). Dest is never
+--             touched until the agent leg is genuinely ANSWERED (a true
+--             200 OK) — NOT merely "ready" (which is also true while the
+--             call is only ringing / in early media). Polling on
+--             CoreSession:answered() instead of CoreSession:ready() alone
+--             prevents the destination from being dialed while the agent's
+--             phone is still just ringing.
 --   Phase 2 → Once the agent answers, immediately bridge to DESTINATION
 --             through the same gateway. Agent hears US ringback while
 --             dest rings. If the agent never answers within
@@ -83,12 +89,34 @@ local agent_dial = string.format(
 
 log("Dialing agent leg: " .. agent_dial)
 
--- freeswitch.Session blocks until the agent answers (real 200 OK) or timeout
+-- freeswitch.Session() returns as soon as the outbound leg is "ready" —
+-- which happens on early media / ringing too, NOT only on a true answer.
+-- (CoreSession:ready() is true during ringback; CoreSession:answered() is
+-- the only reliable way to detect a real 200 OK.) Relying on ready() alone
+-- caused the destination to be dialed while the agent's phone was still
+-- just ringing, making both legs appear to ring "at the same time".
 local agent_session = freeswitch.Session(agent_dial)
 
--- ── Check agent answered ──────────────────────────────────────────────────────
+-- ── Check agent leg exists at all ────────────────────────────────────────────
 if not agent_session or not agent_session:ready() then
-    log_err("Agent did not answer or call was rejected — dest NOT called.")
+    log_err("Agent leg failed to establish (rejected/no answer) — dest NOT called.")
+    return
+end
+
+-- ── Wait for a REAL answer (ignore ringing / early media) ────────────────────
+local agent_timeout_ms = AGENT_ANSWER_TIMEOUT * 1000
+local waited_ms = 0
+local poll_ms    = 200
+while agent_session:ready() and not agent_session:answered() and waited_ms < agent_timeout_ms do
+    freeswitch.msleep(poll_ms)
+    waited_ms = waited_ms + poll_ms
+end
+
+if not agent_session:ready() or not agent_session:answered() then
+    log_err("Agent did not answer within " .. AGENT_ANSWER_TIMEOUT .. "s — dest NOT called.")
+    if agent_session:ready() then
+        agent_session:hangup("NO_ANSWER")
+    end
     return
 end
 
@@ -121,8 +149,12 @@ local dest_dial = string.format(
     dest_number
 )
 
--- Tell the agent the call is connecting
-agent_session:execute("speak", "flite|kal|Connecting your call now. Please hold.")
+-- Tell the agent the call is connecting (best-effort — some FreeSWITCH
+-- installs don't have mod_flite; don't let a missing TTS module affect
+-- the call flow if it errors)
+pcall(function()
+    agent_session:execute("speak", "flite|kal|Connecting your call now. Please hold.")
+end)
 freeswitch.msleep(1000)
 
 -- Bridge blocks until one side hangs up
@@ -140,4 +172,3 @@ if agent_session:ready() then
 end
 
 log("CTC session complete for agent=" .. agent_number .. " dest=" .. dest_number)
-
