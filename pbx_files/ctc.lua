@@ -174,9 +174,12 @@ local dest_dial = string.format(
 -- Tell the agent the call is connecting (best-effort — some FreeSWITCH
 -- installs don't have mod_flite; don't let a missing TTS module affect
 -- the call flow if it errors)
-pcall(function()
+local tts_ok, tts_err = pcall(function()
     agent_session:execute("speak", "flite|kal|Connecting your call now. Please hold.")
 end)
+if not tts_ok then
+    log_err("TTS announcement failed (mod_flite missing/misconfigured?): " .. tostring(tts_err))
+end
 freeswitch.msleep(1000)
 
 log("Dialing destination leg: " .. dest_dial)
@@ -215,8 +218,10 @@ while agent_session:ready() and dest_session:ready() do
     freeswitch.msleep(500)
 end
 
-local hangup_cause = agent_session:hangupCause() or dest_session:hangupCause()
-log("Call ended. Hangup cause: " .. (hangup_cause or "UNKNOWN"))
+local agent_hangup_cause = agent_session:hangupCause()
+local dest_hangup_cause  = dest_session:hangupCause()
+log("Call ended. Agent hangup cause: " .. (agent_hangup_cause or "UNKNOWN") ..
+    ", Dest hangup cause: " .. (dest_hangup_cause or "UNKNOWN"))
 
 -- ── Cleanup ───────────────────────────────────────────────────────────────────
 if agent_session:ready() then
