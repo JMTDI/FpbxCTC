@@ -11,9 +11,12 @@
 --             CoreSession:answered() instead of CoreSession:ready() alone
 --             prevents the destination from being dialed while the agent's
 --             phone is still just ringing.
---   Phase 2 → Once the agent answers, immediately bridge to DESTINATION
---             through the same gateway. Agent hears US ringback while
---             dest rings. If the agent never answers within
+--   Phase 2 → Once the agent answers, originate DESTINATION as its own
+--             independent session through the same gateway and join both
+--             legs with uuid_bridge (NOT agent_session:execute("bridge",...),
+--             which is unreliable for a Lua-originated orphan leg and can
+--             silently fail to ever dial dest). Agent hears real ringback
+--             while dest rings. If the agent never answers within
 --             AGENT_ANSWER_TIMEOUT, the origination attempt is cancelled
 --             and dest is NEVER called.
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -136,7 +139,18 @@ freeswitch.msleep(500)  -- small pause so audio path is stable
 log("Agent answered. Now dialing destination: " .. dest_number)
 
 -- ── Phase 2: Bridge to DESTINATION ───────────────────────────────────────────
--- Agent hears US ringback (buzz buzz) while destination rings
+-- Agent hears real ringback while destination rings.
+--
+-- NOTE: calling agent_session:execute("bridge", dest_dial) directly on a
+-- CoreSession that was originated from Lua (via freeswitch.Session()) is
+-- unreliable — that leg is a bare C-leg that was never bound to a dialplan
+-- context, so the "bridge" application can silently fail to actually place
+-- the destination call (or the channel can fall through into unrelated
+-- default-context extensions) instead of connecting it, leaving the agent
+-- bridged to nothing until the leg is torn down. Originating the destination
+-- as its own independent session and joining both legs with the uuid_bridge
+-- API command is the supported, reliable way to bridge two independently
+-- originated legs from a Lua script.
 
 if not agent_session:ready() then
     log_err("Agent session dropped before destination could be dialed.")
@@ -146,8 +160,9 @@ end
 local dest_dial = string.format(
     "{origination_caller_id_name='%s'," ..
     "origination_caller_id_number='%s'," ..
-    "ignore_early_media=false," ..
-    "originate_timeout=%d}" ..
+    "ignore_early_media=true," ..
+    "originate_timeout=%d," ..
+    "ringback=%%(2000,4000,440,480)}" ..
     "sofia/gateway/%s/%s",
     CID_NAME,
     CID_NUMBER_DEST,
@@ -164,18 +179,51 @@ pcall(function()
 end)
 freeswitch.msleep(1000)
 
--- Bridge blocks until one side hangs up
--- ringback variable makes agent hear buzz buzz while dest rings
-agent_session:setVariable("ringback", "%(2000,4000,440,480)")
-agent_session:setVariable("transfer_ringback", "%(2000,4000,440,480)")
-agent_session:execute("bridge", dest_dial)
+log("Dialing destination leg: " .. dest_dial)
 
-local hangup_cause = agent_session:hangupCause()
+-- ignore_early_media=true lets freeswitch.Session() return as soon as the
+-- destination leg is ringing/in early media (not only once fully answered),
+-- so we can bridge the legs right away and the agent hears the destination's
+-- real ringback instead of the call appearing to hang while dest rings.
+local dest_session = freeswitch.Session(dest_dial)
+
+if not dest_session or not dest_session:ready() then
+    log_err("Destination leg failed to establish (rejected/no answer) — hanging up agent leg.")
+    if agent_session:ready() then
+        agent_session:hangup("NO_ANSWER")
+    end
+    return
+end
+
+-- Both legs are now independent, fully-formed sessions. Disable Lua's
+-- auto-hangup on script exit for both so uuid_bridge can keep them alive
+-- and under FreeSWITCH's normal media-bridging control instead of ours.
+agent_session:setAutoHangup(false)
+dest_session:setAutoHangup(false)
+
+local agent_uuid = agent_session:get_uuid()
+local dest_uuid  = dest_session:get_uuid()
+
+log("Bridging agent (" .. agent_uuid .. ") to destination (" .. dest_uuid .. ")")
+
+local api = freeswitch.API()
+local bridge_result = api:executeString("uuid_bridge " .. agent_uuid .. " " .. dest_uuid)
+log("uuid_bridge result: " .. tostring(bridge_result))
+
+-- Block here (like the old blocking "bridge" execute) until either leg hangs up
+while agent_session:ready() and dest_session:ready() do
+    freeswitch.msleep(500)
+end
+
+local hangup_cause = agent_session:hangupCause() or dest_session:hangupCause()
 log("Call ended. Hangup cause: " .. (hangup_cause or "UNKNOWN"))
 
 -- ── Cleanup ───────────────────────────────────────────────────────────────────
 if agent_session:ready() then
     agent_session:hangup("NORMAL_CLEARING")
+end
+if dest_session:ready() then
+    dest_session:hangup("NORMAL_CLEARING")
 end
 
 log("CTC session complete for agent=" .. agent_number .. " dest=" .. dest_number)
