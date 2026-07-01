@@ -61,8 +61,9 @@ define('GATEWAY', 'YOUR-GATEWAY-UUID-HERE');
 
 ```lua
 -- ctc.lua
-local GATEWAY    = "YOUR-GATEWAY-UUID-HERE"
-local CID_NUMBER = "15550000000"   -- your outbound caller ID
+local GATEWAY         = "YOUR-GATEWAY-UUID-HERE"
+local CID_NUMBER_AGENT = "15550000001"   -- outbound caller ID used when calling the agent
+local CID_NUMBER_DEST  = "15550000002"   -- outbound caller ID used when calling the destination
 ```
 
 Your gateway UUID is in FusionPBX → **Accounts → Gateways** → click your gateway → copy the UUID from the URL.
@@ -71,16 +72,13 @@ Both the agent leg and the destination leg are dialed out through the external `
 
 ### Troubleshooting: call connects but there is no audio (silent call)
 
-If both the agent and destination legs answer/bridge successfully (no errors in the log, hangup cause looks normal) but **neither side hears anything**, check whether `CID_NUMBER` is a number that is *also* configured as an inbound DID/route on the same trunk/gateway you're dialing out through.
+If both the agent and destination legs answer/bridge successfully (no errors in the log, hangup cause looks normal) but **neither side hears anything**, this is typically caused by one of the outbound caller ID numbers also being provisioned as an inbound DID/route on the same trunk/gateway you're dialing out through.
 
 Some carriers/SBCs will let the SIP signaling for such a call complete normally (200 OK on both legs) while silently withholding the RTP media path, because the outbound call looks self-referential (calling out with a CID that also routes calls in on the same trunk). The result is a call that looks fully connected but is completely silent.
 
-`ctc.lua` includes two mitigations for this:
+`ctc.lua` uses **two separate caller IDs** — `CID_NUMBER_AGENT` for the agent leg and `CID_NUMBER_DEST` for the destination leg — specifically to avoid this. If you want to use your business number as one of the caller IDs, set it as `CID_NUMBER_DEST` (or `CID_NUMBER_AGENT`) and use a different, unrelated number for the other leg — just make sure neither CID is the same number as the one being dialed on the *other* leg, and ideally neither CID is a number with an active inbound route on the same trunk it's dialing out through.
 
-- **Self-dial guard** — aborts with a clear log error if `CID_NUMBER` is literally the same number being dialed as the agent or destination.
-- **`FORCE_MEDIA_ANCHOR`** (enabled by default) — forces FreeSWITCH to anchor/proxy RTP on both legs (`bypass_media=false`, `proxy_media=false`) and corrects RTP timestamp/timing discontinuities (`rtp_autofix_timing`, `rtp_rewrite_timestamps`), which can restore audio in some hairpin/self-referential scenarios.
-
-If audio is still silent after this, the issue is carrier/trunk-side (not something a FreeSWITCH dialplan/script can fully control): use a different, distinct outbound-only CID that is not also an inbound DID on the same trunk, or ask your SIP trunk provider whether they block/clip media for outbound calls whose CID matches a number they also deliver inbound calls for on that trunk.
+If audio is still silent after using two distinct CIDs, the issue is carrier/trunk-side (not something a FreeSWITCH dialplan/script can fully control): ask your SIP trunk provider whether they block/clip media for outbound calls whose CID matches a number they also deliver inbound calls for on that trunk.
 
 ---
 

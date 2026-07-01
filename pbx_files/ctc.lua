@@ -21,7 +21,14 @@
 -- ── Config ────────────────────────────────────────────────────────────────────
 local GATEWAY        = "YOUR-GATEWAY-UUID-HERE"  -- Sofia gateway UUID from FusionPBX → Accounts → Gateways
 local CID_NAME       = "Click-To-Call"
-local CID_NUMBER     = "15550000000"             -- Outbound caller ID number
+-- Separate outbound caller IDs for each leg. Using two distinct numbers
+-- avoids the carrier/SBC treating the call as self-referential when one
+-- of them is also provisioned as an inbound DID on this same trunk —
+-- e.g. use a random/unrelated DID for the agent leg, and your business
+-- number for the destination leg (or vice versa), as long as the two
+-- legs never present the same CID as a number that is also being dialed.
+local CID_NUMBER_AGENT = "15550000001"           -- Outbound caller ID used when calling the AGENT
+local CID_NUMBER_DEST  = "15550000002"           -- Outbound caller ID used when calling the DESTINATION
 -- Seconds to wait for the AGENT leg to answer before FreeSWITCH's
 -- originate_timeout cancels the attempt. Kept short (~3 rings) so the
 -- destination is never dialed once the agent's voicemail would pick up.
@@ -30,25 +37,6 @@ local AGENT_ANSWER_TIMEOUT = 16
 -- Seconds to wait for the DESTINATION leg to answer (Phase 2 bridge).
 local DEST_ANSWER_TIMEOUT  = 30
 local LOG_PREFIX     = "[CTC] "
-
--- Force FreeSWITCH to anchor (proxy) RTP on both legs instead of allowing
--- direct/optimized media between the carrier and the far end.
--- Why this matters: if CID_NUMBER is also provisioned as an inbound DID on
--- this same trunk, some carriers/SBCs will let the SIP signaling complete
--- normally (200 OK on both legs) but silently withhold the RTP media path
--- (a "connected but silent" call) because the outbound call looks like a
--- self-referential / spoofed call on that trunk. bypass_media=false keeps
--- FreeSWITCH fully in the RTP path (no direct media between the two SIP
--- endpoints); proxy_media=false additionally prevents FreeSWITCH from
--- re-negotiating a codec-passthrough shortcut, so audio is always
--- transcoded/anchored through FreeSWITCH on both legs. Combined with
--- re-timestamping audio (rtp_autofix_timing / rtp_rewrite_timestamps),
--- maximizes the chance that audio still flows even when the carrier's own
--- direct-media/early-media shortcuts are being blocked for this CID.
--- This does NOT fix carrier/SBC-side call blocking or attestation
--- failures — if audio is still silent after this change, the CID itself
--- must not be used for outbound presentation on this trunk (see README).
-local FORCE_MEDIA_ANCHOR = true
 
 -- ── Helpers ───────────────────────────────────────────────────────────────────
 local function log(msg)
@@ -87,43 +75,7 @@ if #dest_number < 7 then
     return
 end
 
--- ── CID / same-trunk collision guard ─────────────────────────────────────────
--- If the outbound caller ID number is literally the same number being dialed
--- (agent or dest), some carriers will reject or silently drop the call's
--- media because it looks like the number is calling itself. Abort early
--- with a clear error instead of producing a "connected but silent" call.
-local cid_digits = (CID_NUMBER or ""):gsub("%D", "")
-if cid_digits == agent_number or cid_digits == dest_number then
-    log_err("CID_NUMBER (" .. CID_NUMBER .. ") matches the number being dialed — " ..
-            "this causes a self-referential call on the same trunk. Signaling " ..
-            "may succeed but audio will likely be silent on both legs. " ..
-            "Use a different outbound CID or dial a different number.")
-    return
-end
-
 log("Starting CTC — Agent: " .. agent_number .. "  Dest: " .. dest_number)
-if FORCE_MEDIA_ANCHOR then
-    log("NOTE: If CID_NUMBER (" .. CID_NUMBER .. ") is also provisioned as an " ..
-        "inbound DID on this same trunk/gateway, some carriers will connect " ..
-        "the call (200 OK on both legs) but withhold RTP media, producing a " ..
-        "silent call. FORCE_MEDIA_ANCHOR is enabled to mitigate this, but if " ..
-        "audio is still silent, stop using this CID for outbound presentation " ..
-        "on this trunk (see README troubleshooting section).")
-end
-
--- ── Media anchoring channel variables ────────────────────────────────────────
--- bypass_media=false / proxy_media=false force FreeSWITCH to stay in the RTP
--- path on both legs instead of letting the carrier negotiate direct media.
--- rtp_autofix_timing / rtp_rewrite_timestamps correct SSRC/timestamp
--- discontinuities that commonly appear on hairpinned/self-referential calls.
-local media_anchor_vars = ""
-if FORCE_MEDIA_ANCHOR then
-    media_anchor_vars =
-        "bypass_media=false," ..
-        "proxy_media=false," ..
-        "rtp_autofix_timing=true," ..
-        "rtp_rewrite_timestamps=true,"
-end
 
 -- ── Phase 1: Originate call to AGENT ─────────────────────────────────────────
 -- ignore_early_media=false so we wait for a real 200 OK (true answer)
@@ -133,12 +85,10 @@ local agent_dial = string.format(
     "{origination_caller_id_name='%s'," ..
     "origination_caller_id_number='%s'," ..
     "ignore_early_media=false," ..
-    "%s" ..
     "originate_timeout=%d}" ..
     "sofia/gateway/%s/%s",
     CID_NAME,
-    CID_NUMBER,
-    media_anchor_vars,
+    CID_NUMBER_AGENT,
     AGENT_ANSWER_TIMEOUT,
     GATEWAY,
     agent_number
@@ -197,12 +147,10 @@ local dest_dial = string.format(
     "{origination_caller_id_name='%s'," ..
     "origination_caller_id_number='%s'," ..
     "ignore_early_media=false," ..
-    "%s" ..
     "originate_timeout=%d}" ..
     "sofia/gateway/%s/%s",
     CID_NAME,
-    CID_NUMBER,
-    media_anchor_vars,
+    CID_NUMBER_DEST,
     DEST_ANSWER_TIMEOUT,
     GATEWAY,
     dest_number
