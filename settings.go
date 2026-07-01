@@ -47,7 +47,7 @@ func RunSettings() {
 	addLabel("Domain:", 10, 23, 115, 20)
 	addLabel("API Key:", 10, 62, 115, 20)
 	addLabel("Agent Number:", 10, 101, 115, 20)
-	addLabel("Domain = without https://   |   Agent = your desk extension", 10, 130, 480, 18)
+	addLabel("Domain = without https://   |   Agent = your external phone number", 10, 130, 480, 18)
 
 	// ── Edit fields ───────────────────────────────────────────────────────────
 

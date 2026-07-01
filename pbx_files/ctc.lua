@@ -3,16 +3,11 @@
 -- File   : /usr/share/freeswitch/scripts/ctc.lua
 -- Usage  : fs_cli -x "luarun ctc.lua <agent_number> <dest_number>"
 -- Flow   :
---   Phase 1 → Originate an INTERNAL call to the AGENT's desk extension
---             (dest is never touched until the agent actually answers).
---             The agent number is a local FusionPBX extension, so it MUST
---             be dialed via "user/<ext>@<domain>", never through the
---             external gateway — a carrier cannot route a 3-4 digit
---             extension, so sending the agent leg out the trunk causes
---             the agent's phone to never ring while the script still
---             falls through to Phase 2 and dials the destination.
+--   Phase 1 → Originate an outbound call through the external gateway to the
+--             AGENT's external number (e.g. cell phone). Dest is never
+--             touched until the agent actually answers.
 --   Phase 2 → Once the agent answers, immediately bridge to DESTINATION
---             through the external gateway. Agent hears US ringback while
+--             through the same gateway. Agent hears US ringback while
 --             dest rings. If the agent never answers within
 --             AGENT_ANSWER_TIMEOUT, the origination attempt is cancelled
 --             and dest is NEVER called.
@@ -20,7 +15,6 @@
 
 -- ── Config ────────────────────────────────────────────────────────────────────
 local GATEWAY        = "YOUR-GATEWAY-UUID-HERE"  -- Sofia gateway UUID from FusionPBX → Accounts → Gateways
-local DOMAIN         = "YOUR-PBX-DOMAIN-HERE"    -- FusionPBX domain the agent extension belongs to (e.g. pbx.example.com)
 local CID_NAME       = "Click-To-Call"
 local CID_NUMBER     = "15550000000"             -- Outbound caller ID number
 -- Seconds to wait for the AGENT leg to answer before FreeSWITCH's
@@ -74,24 +68,18 @@ log("Starting CTC — Agent: " .. agent_number .. "  Dest: " .. dest_number)
 -- ── Phase 1: Originate call to AGENT ─────────────────────────────────────────
 -- ignore_early_media=false so we wait for a real 200 OK (true answer)
 -- NOT using ignore_early_media=true which would race straight through on ringback
---
--- IMPORTANT: agent_number is a LOCAL extension, not an external number, so it
--- must be dialed internally via "user/<ext>@<domain>" (resolves the
--- extension's registered device through the FusionPBX directory). Dialing it
--- through "sofia/gateway/..." sends it out the external trunk instead, which
--- a carrier cannot route — the agent's desk phone never rings.
 
 local agent_dial = string.format(
     "{origination_caller_id_name='%s'," ..
     "origination_caller_id_number='%s'," ..
     "ignore_early_media=false," ..
     "originate_timeout=%d}" ..
-    "user/%s@%s",
+    "sofia/gateway/%s/%s",
     CID_NAME,
     CID_NUMBER,
     AGENT_ANSWER_TIMEOUT,
-    agent_number,
-    DOMAIN
+    GATEWAY,
+    agent_number
 )
 
 log("Dialing agent leg: " .. agent_dial)

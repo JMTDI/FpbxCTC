@@ -62,13 +62,12 @@ define('GATEWAY', 'YOUR-GATEWAY-UUID-HERE');
 ```lua
 -- ctc.lua
 local GATEWAY    = "YOUR-GATEWAY-UUID-HERE"
-local DOMAIN     = "YOUR-PBX-DOMAIN-HERE"  -- the FusionPBX domain your agent extensions belong to
 local CID_NUMBER = "15550000000"   -- your outbound caller ID
 ```
 
 Your gateway UUID is in FusionPBX → **Accounts → Gateways** → click your gateway → copy the UUID from the URL.
 
-`DOMAIN` must match the FusionPBX domain the **agent** extension is registered under (e.g. `pbx.example.com`). The agent leg is dialed internally as `user/<agent>@<domain>` so it rings the agent's desk phone directly — only the destination leg goes out through the external `GATEWAY`.
+Both the agent leg and the destination leg are dialed out through the external `GATEWAY` — the agent number should be a real external number (e.g. a cell phone) reachable via your carrier, not an internal FusionPBX extension.
 
 ---
 
@@ -179,7 +178,7 @@ FpbxCTC/
 {
   "domain": "pbx.example.com",
   "api_key": "your-api-key-here",
-  "agent_number": "1001"
+  "agent_number": "15551001234"
 }
 ```
 
