@@ -69,6 +69,19 @@ Your gateway UUID is in FusionPBX → **Accounts → Gateways** → click your g
 
 Both the agent leg and the destination leg are dialed out through the external `GATEWAY` — the agent number should be a real external number (e.g. a cell phone) reachable via your carrier, not an internal FusionPBX extension.
 
+### Troubleshooting: call connects but there is no audio (silent call)
+
+If both the agent and destination legs answer/bridge successfully (no errors in the log, hangup cause looks normal) but **neither side hears anything**, check whether `CID_NUMBER` is a number that is *also* configured as an inbound DID/route on the same trunk/gateway you're dialing out through.
+
+Some carriers/SBCs will let the SIP signaling for such a call complete normally (200 OK on both legs) while silently withholding the RTP media path, because the outbound call looks self-referential (calling out with a CID that also routes calls in on the same trunk). The result is a call that looks fully connected but is completely silent.
+
+`ctc.lua` includes two mitigations for this:
+
+- **Self-dial guard** — aborts with a clear log error if `CID_NUMBER` is literally the same number being dialed as the agent or destination.
+- **`FORCE_MEDIA_ANCHOR`** (enabled by default) — forces FreeSWITCH to anchor/proxy RTP on both legs (`bypass_media=false`, `proxy_media=false`) and corrects RTP timestamp/timing discontinuities (`rtp_autofix_timing`, `rtp_rewrite_timestamps`), which can restore audio in some hairpin/self-referential scenarios.
+
+If audio is still silent after this, the issue is carrier/trunk-side (not something a FreeSWITCH dialplan/script can fully control): use a different, distinct outbound-only CID that is not also an inbound DID on the same trunk, or ask your SIP trunk provider whether they block/clip media for outbound calls whose CID matches a number they also deliver inbound calls for on that trunk.
+
 ---
 
 ## Quick start (installer)
