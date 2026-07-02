@@ -27,6 +27,18 @@
 --   the agent channel the instant it answers — the exact same code path
 --   used by every other working bridge on the system (dialplan XML bridges,
 --   ring groups, etc.), which is what actually carries audio.
+--
+--   IMPORTANT #2: The agent leg's dial string MUST set
+--   ignore_early_media=true. For a single-destination originate (no hunt
+--   group / no "|" alternatives), FreeSWITCH reports origination success as
+--   soon as it receives ANY provisional SIP response with SDP (e.g. 183
+--   Session Progress / early media) — NOT only on a true 200 OK — unless
+--   ignore_early_media=true is set. Without it, `&bridge(dest)` was
+--   observed firing 6+ seconds before the agent's phone was genuinely
+--   answered, meaning dest got dialed while the agent was still just
+--   ringing (both phones appeared to ring "at the same time") and the
+--   resulting media never lined up (no audio). ignore_early_media=true
+--   makes FreeSWITCH itself gate the bridge on a real answer.
 -- ─────────────────────────────────────────────────────────────────────────────
 
 -- ── Config ────────────────────────────────────────────────────────────────────
@@ -100,10 +112,24 @@ local dest_dial = string.format(
 -- ── Build the agent dial string ─────────────────────────────────────────────
 -- ringback/transfer_ringback: what the agent hears while dest is ringing
 -- (applied natively by the bridge app once it takes over the agent leg).
+--
+-- ignore_early_media=true is REQUIRED here (not false!). For a single-
+-- destination originate, FreeSWITCH considers the call "successful" as soon
+-- as it receives ANY provisional SIP response with SDP (e.g. 183 Session
+-- Progress / early media) UNLESS ignore_early_media=true is set — in which
+-- case it correctly waits for a genuine 200 OK before reporting success.
+-- Confirmed from logs: with ignore_early_media=false, "Originate Resulted
+-- in Success" (and the &bridge(dest) execute) fired the instant 183 early
+-- media arrived, 6+ seconds before the agent's phone was actually answered
+-- — meaning the destination was being dialed while the agent's phone was
+-- still just ringing (both legs appeared to ring "at the same time", and
+-- the resulting bridge connected two mismatched/early media states with no
+-- audio). Setting ignore_early_media=true makes FreeSWITCH itself gate
+-- &bridge(dest) on a true answer, matching the intended Phase 1/Phase 2 flow.
 local agent_dial = string.format(
     "{origination_caller_id_name='%s'," ..
     "origination_caller_id_number='%s'," ..
-    "ignore_early_media=false," ..
+    "ignore_early_media=true," ..
     "originate_timeout=%d," ..
     "ringback='%s'," ..
     "transfer_ringback='%s'," ..
