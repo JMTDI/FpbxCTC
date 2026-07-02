@@ -46,6 +46,27 @@ local GATEWAY        = "YOUR-GATEWAY-UUID-HERE"  -- Sofia gateway UUID from Fusi
 local CID_NAME       = "Click-To-Call"
 local CID_NUMBER     = "15550000000"             -- Outbound caller ID number
 
+-- Default area code to prepend to bare 7-digit local numbers (no area code).
+-- Most SIP trunks/carriers cannot route a 7-digit number on their own — they
+-- need the full 10-digit NANP number (area code + subscriber number).
+-- Auto-derived from CID_NUMBER above (your own business number already
+-- contains your local area code), so no extra configuration is needed.
+-- Leave DEFAULT_AREA_CODE_OVERRIDE set to override the auto-detected value,
+-- or set it if CID_NUMBER isn't in your local area code.
+local DEFAULT_AREA_CODE_OVERRIDE = ""
+
+local function derive_area_code(cid)
+    local digits = cid:gsub("%D", "")
+    if #digits == 11 and digits:sub(1, 1) == "1" then
+        return digits:sub(2, 4)
+    elseif #digits == 10 then
+        return digits:sub(1, 3)
+    end
+    return ""
+end
+
+local DEFAULT_AREA_CODE = DEFAULT_AREA_CODE_OVERRIDE ~= "" and DEFAULT_AREA_CODE_OVERRIDE or derive_area_code(CID_NUMBER)
+
 -- ── Local/hairpin DID handling ────────────────────────────────────────────────
 -- If the "agent" number you pass to this script is actually one of YOUR OWN
 -- PBX's DIDs (a business number that's routed, via an inbound route, to a
@@ -114,6 +135,22 @@ end
 -- Strip anything non-numeric (safety net — php already does this)
 agent_number = agent_number:gsub("%D", "")
 dest_number  = dest_number:gsub("%D", "")
+
+-- Bare 7-digit numbers have no area code, so the carrier/trunk can't route
+-- them — it just fails the leg instantly, which (combined with
+-- hangup_after_bridge=true on the agent leg) is why the agent's call was
+-- being cut the moment they answered. Prepend the configured default area
+-- code so these become full 10-digit NANP numbers before we ever dial out.
+if DEFAULT_AREA_CODE ~= "" then
+    if #agent_number == 7 then
+        log("Agent number " .. agent_number .. " has no area code — prepending default area code " .. DEFAULT_AREA_CODE)
+        agent_number = DEFAULT_AREA_CODE .. agent_number
+    end
+    if #dest_number == 7 then
+        log("Destination number " .. dest_number .. " has no area code — prepending default area code " .. DEFAULT_AREA_CODE)
+        dest_number = DEFAULT_AREA_CODE .. dest_number
+    end
+end
 
 -- No fixed length restriction — allow extensions, local, and international
 -- numbers of any digit count. Only reject empty strings.
