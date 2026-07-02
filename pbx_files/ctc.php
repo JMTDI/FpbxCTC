@@ -71,11 +71,8 @@ if ($is_api) {
         echo json_encode(['status' => 'error', 'message' => 'Missing agent or destination number']);
         exit;
     }
-    if (strlen($agent) < 7 || strlen($agent) > 15 || strlen($dest) < 7 || strlen($dest) > 15) {
-        http_response_code(400);
-        echo json_encode(['status' => 'error', 'message' => 'Invalid agent or destination number']);
-        exit;
-    }
+    // No fixed length restriction — allow extensions, local, and international
+    // numbers of any digit count. Only reject empty strings (already handled above).
 
     $agent = escapeshellarg($agent);
     $dest  = escapeshellarg($dest);
@@ -142,7 +139,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'call') {
         $agent = clean_num($_POST['agent'] ?? '');
         $dest  = clean_num($_POST['dest']  ?? '');
-        if ($agent && $dest && strlen($agent) >= 7 && strlen($dest) >= 7) {
+        if ($agent && $dest) {
             $cmd = "fs_cli -x \"luarun " . LUA_SCRIPT . " {$agent} {$dest}\" > /dev/null 2>&1 &";
             exec($cmd);
             $action_msg = '<div class="msg success">📞 Call initiated — agent will ring shortly.</div>';
@@ -241,11 +238,11 @@ $host = $_SERVER['HTTP_HOST'] ?? 'yourpbx.com';
       <div class="row2">
         <div>
           <label>Agent Number (rings first)</label>
-          <input type="text" name="agent" placeholder="e.g. 15551001" maxlength="15">
+          <input type="text" name="agent" placeholder="e.g. 15551001" maxlength="32">
         </div>
         <div>
           <label>Destination Number (bridges after agent answers)</label>
-          <input type="text" name="dest" placeholder="e.g. 15551234567" maxlength="15">
+          <input type="text" name="dest" placeholder="e.g. 15551234567" maxlength="32">
         </div>
       </div>
       <button type="submit" class="btn btn-green mt">📞 Call</button>

@@ -115,13 +115,15 @@ end
 agent_number = agent_number:gsub("%D", "")
 dest_number  = dest_number:gsub("%D", "")
 
-if #agent_number < 3 then
-    log_err("Agent number too short: " .. agent_number)
+-- No fixed length restriction — allow extensions, local, and international
+-- numbers of any digit count. Only reject empty strings.
+if #agent_number < 1 then
+    log_err("Agent number is empty after sanitizing: " .. agent_number)
     return
 end
 
-if #dest_number < 7 then
-    log_err("Destination number too short: " .. dest_number)
+if #dest_number < 1 then
+    log_err("Destination number is empty after sanitizing: " .. dest_number)
     return
 end
 
