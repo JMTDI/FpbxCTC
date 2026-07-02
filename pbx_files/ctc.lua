@@ -45,6 +45,46 @@
 local GATEWAY        = "YOUR-GATEWAY-UUID-HERE"  -- Sofia gateway UUID from FusionPBX → Accounts → Gateways
 local CID_NAME       = "Click-To-Call"
 local CID_NUMBER     = "15550000000"             -- Outbound caller ID number
+
+-- ── Local/hairpin DID handling ────────────────────────────────────────────────
+-- If the "agent" number you pass to this script is actually one of YOUR OWN
+-- PBX's DIDs (a business number that's routed, via an inbound route, to a
+-- ring group/extension/IVR on this SAME server), do NOT dial it out through
+-- the sofia gateway. Doing so sends the call out to the carrier and back in
+-- again ("hairpin"): the carrier hands FreeSWITCH's own IP back as the
+-- "remote" media address for that leg, because the DID is registered back to
+-- this box. That creates two independent SIP dialogs on the same server with
+-- a fragile/incorrect media path — confirmed from logs: call state/answer
+-- signaling all looked correct, but no audio flowed in either direction.
+--
+-- Fix: for any agent number listed in LOCAL_DIDS, originate a `loopback`
+-- channel into the "public" context (FusionPBX's normal inbound context)
+-- instead of the gateway. This re-injects the number into the exact same
+-- inbound-route → ring group/extension dialplan a genuine inbound call would
+-- use, entirely inside FreeSWITCH — no round trip to the carrier, so
+-- codec/NAT negotiation matches what already works for real inbound calls.
+--
+-- LOCAL_DIDS itself is NOT defined here — it's loaded from
+-- ctc_local_config.lua (same directory), which is git-ignored so real DID
+-- numbers/domains never get committed to a public repo. Copy
+-- ctc_local_config.lua.example to ctc_local_config.lua and fill in your own
+-- values; the script falls back to an empty table (all agent numbers dial
+-- out via the gateway, previous behavior) if that file doesn't exist.
+local LOCAL_DIDS = {}
+local config_path = (debug.getinfo(1, "S").source:match("@(.*[/\\])") or "") .. "ctc_local_config.lua"
+local config_chunk, load_err = loadfile(config_path)
+if config_chunk then
+    local ok, loaded = pcall(config_chunk)
+    if ok and type(loaded) == "table" then
+        LOCAL_DIDS = loaded
+    end
+end
+
+-- Context real inbound calls land in before FusionPBX's inbound route
+-- dispatches them to the right domain/ring group. Default FusionPBX setup
+-- uses "public" for this — change only if your inbound routes use a
+-- different context.
+local LOCAL_INBOUND_CONTEXT = "public"
 -- Seconds to wait for the AGENT leg to answer before FreeSWITCH's
 -- originate_timeout cancels the attempt. Kept short (~3 rings) so the
 -- destination is never dialed once the agent's voicemail would pick up.
@@ -126,23 +166,54 @@ local dest_dial = string.format(
 -- the resulting bridge connected two mismatched/early media states with no
 -- audio). Setting ignore_early_media=true makes FreeSWITCH itself gate
 -- &bridge(dest) on a true answer, matching the intended Phase 1/Phase 2 flow.
-local agent_dial = string.format(
-    "{origination_caller_id_name='%s'," ..
-    "origination_caller_id_number='%s'," ..
-    "ignore_early_media=true," ..
-    "originate_timeout=%d," ..
-    "ringback='%s'," ..
-    "transfer_ringback='%s'," ..
-    "hangup_after_bridge=true}" ..
-    "sofia/gateway/%s/%s",
-    CID_NAME,
-    CID_NUMBER,
-    AGENT_ANSWER_TIMEOUT,
-    RINGBACK,
-    RINGBACK,
-    GATEWAY,
-    agent_number
-)
+local agent_dial
+local local_domain = LOCAL_DIDS[agent_number]
+
+if local_domain then
+    -- Local/hairpin DID: route through FusionPBX's own inbound dialplan via
+    -- a loopback channel instead of the gateway. This lands on the exact
+    -- same ring group/extension a real inbound call to this DID would hit,
+    -- with none of the carrier round-trip that broke audio.
+    log("Agent number " .. agent_number .. " is a local DID — routing via loopback into domain "
+        .. local_domain .. " instead of the gateway.")
+    agent_dial = string.format(
+        "{origination_caller_id_name='%s'," ..
+        "origination_caller_id_number='%s'," ..
+        "ignore_early_media=true," ..
+        "originate_timeout=%d," ..
+        "ringback='%s'," ..
+        "transfer_ringback='%s'," ..
+        "hangup_after_bridge=true," ..
+        "domain_name='%s'}" ..
+        "loopback/%s/%s",
+        CID_NAME,
+        CID_NUMBER,
+        AGENT_ANSWER_TIMEOUT,
+        RINGBACK,
+        RINGBACK,
+        local_domain,
+        agent_number,
+        LOCAL_INBOUND_CONTEXT
+    )
+else
+    agent_dial = string.format(
+        "{origination_caller_id_name='%s'," ..
+        "origination_caller_id_number='%s'," ..
+        "ignore_early_media=true," ..
+        "originate_timeout=%d," ..
+        "ringback='%s'," ..
+        "transfer_ringback='%s'," ..
+        "hangup_after_bridge=true}" ..
+        "sofia/gateway/%s/%s",
+        CID_NAME,
+        CID_NUMBER,
+        AGENT_ANSWER_TIMEOUT,
+        RINGBACK,
+        RINGBACK,
+        GATEWAY,
+        agent_number
+    )
+end
 
 -- ── Single native originate: dial agent, bridge to dest ONLY on true answer ──
 -- `&bridge(...)` is FreeSWITCH's execute-on-answer mechanism: it only fires
