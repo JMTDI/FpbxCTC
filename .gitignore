@@ -30,9 +30,6 @@ installer/Cargo.lock
 # ── User config (stored in %APPDATA%, never in the repo) ──────────────────────
 config.json
 
-# ── CTC local/hairpin DID config (real numbers/domains, never in the repo) ────
-pbx_files/ctc_local_config.lua
-
 # ── OS clutter ────────────────────────────────────────────────────────────────
 Thumbs.db
 .DS_Store

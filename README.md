@@ -67,6 +67,30 @@ local CID_NUMBER = "15550000000"   -- your outbound caller ID
 
 Your gateway UUID is in FusionPBX → **Accounts → Gateways** → click your gateway → copy the UUID from the URL.
 
+### Optional: routing a "local" agent number without a carrier round-trip
+
+If you ever pass one of your **own PBX's business DIDs** as the `agent` number
+(a number that already has an inbound route on this same server, e.g. pointing
+to a ring group), dialing it through the sofia gateway will hairpin the call
+out to your carrier and back in, which can break audio in both directions.
+
+To avoid that, add an entry to `LOCAL_DIDS` near the top of `ctc.lua`:
+
+```lua
+-- ctc.lua
+local LOCAL_DIDS = {
+    ["2075551234"] = "yourdomain.com",  -- agent number -> FusionPBX domain
+}
+```
+
+Numbers listed here are dialed via a `loopback` channel into the inbound
+(`public`) dialplan context instead of the gateway, reusing the same
+inbound-route/ring-group path a genuine inbound call would take.
+
+**Do not commit your real DIDs/domains back to a public fork of this repo** —
+edit `LOCAL_DIDS` only on your deployed copy of `ctc.lua` on the PBX server,
+and leave the checked-in version with the placeholder/empty table.
+
 ---
 
 ## Quick start (installer)

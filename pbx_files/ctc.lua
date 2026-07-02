@@ -57,29 +57,21 @@ local CID_NUMBER     = "15550000000"             -- Outbound caller ID number
 -- a fragile/incorrect media path — confirmed from logs: call state/answer
 -- signaling all looked correct, but no audio flowed in either direction.
 --
--- Fix: for any agent number listed in LOCAL_DIDS, originate a `loopback`
--- channel into the "public" context (FusionPBX's normal inbound context)
--- instead of the gateway. This re-injects the number into the exact same
--- inbound-route → ring group/extension dialplan a genuine inbound call would
--- use, entirely inside FreeSWITCH — no round trip to the carrier, so
+-- Fix: for any agent number listed in LOCAL_DIDS below, originate a
+-- `loopback` channel into the "public" context (FusionPBX's normal inbound
+-- context) instead of the gateway. This re-injects the number into the exact
+-- same inbound-route → ring group/extension dialplan a genuine inbound call
+-- would use, entirely inside FreeSWITCH — no round trip to the carrier, so
 -- codec/NAT negotiation matches what already works for real inbound calls.
 --
--- LOCAL_DIDS itself is NOT defined here — it's loaded from
--- ctc_local_config.lua (same directory), which is git-ignored so real DID
--- numbers/domains never get committed to a public repo. Copy
--- ctc_local_config.lua.example to ctc_local_config.lua and fill in your own
--- values; the script falls back to an empty table (all agent numbers dial
--- out via the gateway, previous behavior) if that file doesn't exist.
-local LOCAL_DIDS = {}
-local config_path = (debug.getinfo(1, "S").source:match("@(.*[/\\])") or "") .. "ctc_local_config.lua"
-local config_chunk, load_err = loadfile(config_path)
-if config_chunk then
-    local ok, loaded = pcall(config_chunk)
-    if ok and type(loaded) == "table" then
-        LOCAL_DIDS = loaded
-    end
-end
-
+-- Map each local DID to the FusionPBX domain its inbound route lives under.
+-- IMPORTANT: fill these in with YOUR real numbers/domains only on your own
+-- deployed copy of this file — do not commit real values back to a public
+-- repo. Leave empty ({}) if none of your agent numbers are local DIDs (all
+-- agent numbers will then dial out via the gateway as before).
+local LOCAL_DIDS = {
+    -- ["YOUR-BUSINESS-DID-HERE"] = "your-fusionpbx-domain.com",
+}
 -- Context real inbound calls land in before FusionPBX's inbound route
 -- dispatches them to the right domain/ring group. Default FusionPBX setup
 -- uses "public" for this — change only if your inbound routes use a
