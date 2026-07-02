@@ -3,32 +3,89 @@
 -- File   : /usr/share/freeswitch/scripts/ctc.lua
 -- Usage  : fs_cli -x "luarun ctc.lua <agent_number> <dest_number>"
 -- Flow   :
---   Phase 1 → Originate an outbound call through the external gateway to the
---             AGENT's external number (e.g. cell phone). Dest is never
---             touched until the agent leg is genuinely ANSWERED (a true
---             200 OK) — NOT merely "ready" (which is also true while the
---             call is only ringing / in early media). Polling on
---             CoreSession:answered() instead of CoreSession:ready() alone
---             prevents the destination from being dialed while the agent's
---             phone is still just ringing.
---   Phase 2 → Once the agent answers, immediately bridge to DESTINATION
---             through the same gateway. Agent hears US ringback while
---             dest rings. If the agent never answers within
---             AGENT_ANSWER_TIMEOUT, the origination attempt is cancelled
---             and dest is NEVER called.
+--   Single native originate → Dial the AGENT through the external gateway.
+--   Dest is NEVER touched until the agent leg is genuinely ANSWERED (a true
+--   200 OK). The moment the agent answers, FreeSWITCH's own bridge
+--   application (via the `&bridge(...)` execute-on-answer mechanism) bridges
+--   straight to DESTINATION through the same gateway — natively, in C, with
+--   no Lua involvement in the live media path.
+--
+--   IMPORTANT: This intentionally does NOT use freeswitch.Session() +
+--   CoreSession:execute("bridge", ...) to manually drive the agent leg.
+--   That approach was tried previously and reliably produced a connected
+--   call with **no audio in either direction**. Root cause (confirmed from
+--   FreeSWITCH logs): a leg created via freeswitch.Session() stays in
+--   CS_SOFT_EXECUTE for its entire lifetime — even while "bridged" — because
+--   its media is piped through the Lua interpreter's read/write loop rather
+--   than FreeSWITCH's native RTP bridge path. In the captured logs the
+--   destination leg correctly entered CS_EXCHANGE_MEDIA, but the agent leg
+--   never did, so no real RTP bridge was ever established between the two
+--   legs even though both showed as "answered".
+--
+--   Using `originate {...}sofia/gateway/GW/AGENT &bridge({...}sofia/gateway/GW/DEST)`
+--   instead lets the FreeSWITCH core run "bridge" as a normal application on
+--   the agent channel the instant it answers — the exact same code path
+--   used by every other working bridge on the system (dialplan XML bridges,
+--   ring groups, etc.), which is what actually carries audio.
+--
+--   IMPORTANT #2: The agent leg's dial string MUST set
+--   ignore_early_media=true. For a single-destination originate (no hunt
+--   group / no "|" alternatives), FreeSWITCH reports origination success as
+--   soon as it receives ANY provisional SIP response with SDP (e.g. 183
+--   Session Progress / early media) — NOT only on a true 200 OK — unless
+--   ignore_early_media=true is set. Without it, `&bridge(dest)` was
+--   observed firing 6+ seconds before the agent's phone was genuinely
+--   answered, meaning dest got dialed while the agent was still just
+--   ringing (both phones appeared to ring "at the same time") and the
+--   resulting media never lined up (no audio). ignore_early_media=true
+--   makes FreeSWITCH itself gate the bridge on a real answer.
 -- ─────────────────────────────────────────────────────────────────────────────
 
 -- ── Config ────────────────────────────────────────────────────────────────────
 local GATEWAY        = "YOUR-GATEWAY-UUID-HERE"  -- Sofia gateway UUID from FusionPBX → Accounts → Gateways
 local CID_NAME       = "Click-To-Call"
 local CID_NUMBER     = "15550000000"             -- Outbound caller ID number
+
+-- ── Local/hairpin DID handling ────────────────────────────────────────────────
+-- If the "agent" number you pass to this script is actually one of YOUR OWN
+-- PBX's DIDs (a business number that's routed, via an inbound route, to a
+-- ring group/extension/IVR on this SAME server), do NOT dial it out through
+-- the sofia gateway. Doing so sends the call out to the carrier and back in
+-- again ("hairpin"): the carrier hands FreeSWITCH's own IP back as the
+-- "remote" media address for that leg, because the DID is registered back to
+-- this box. That creates two independent SIP dialogs on the same server with
+-- a fragile/incorrect media path — confirmed from logs: call state/answer
+-- signaling all looked correct, but no audio flowed in either direction.
+--
+-- Fix: for any agent number listed in LOCAL_DIDS below, originate a
+-- `loopback` channel into the "public" context (FusionPBX's normal inbound
+-- context) instead of the gateway. This re-injects the number into the exact
+-- same inbound-route → ring group/extension dialplan a genuine inbound call
+-- would use, entirely inside FreeSWITCH — no round trip to the carrier, so
+-- codec/NAT negotiation matches what already works for real inbound calls.
+--
+-- Map each local DID to the FusionPBX domain its inbound route lives under.
+-- IMPORTANT: fill these in with YOUR real numbers/domains only on your own
+-- deployed copy of this file — do not commit real values back to a public
+-- repo. Leave empty ({}) if none of your agent numbers are local DIDs (all
+-- agent numbers will then dial out via the gateway as before).
+local LOCAL_DIDS = {
+    -- ["YOUR-BUSINESS-DID-HERE"] = "your-fusionpbx-domain.com",
+}
+-- Context real inbound calls land in before FusionPBX's inbound route
+-- dispatches them to the right domain/ring group. Default FusionPBX setup
+-- uses "public" for this — change only if your inbound routes use a
+-- different context.
+local LOCAL_INBOUND_CONTEXT = "public"
 -- Seconds to wait for the AGENT leg to answer before FreeSWITCH's
 -- originate_timeout cancels the attempt. Kept short (~3 rings) so the
 -- destination is never dialed once the agent's voicemail would pick up.
 -- Voicemail pickup timing varies by carrier/phone/extension — tune per deployment.
 local AGENT_ANSWER_TIMEOUT = 16
--- Seconds to wait for the DESTINATION leg to answer (Phase 2 bridge).
+-- Seconds to wait for the DESTINATION leg to answer (bridge step).
 local DEST_ANSWER_TIMEOUT  = 30
+-- Ringback the agent hears while the destination is ringing.
+local RINGBACK        = "%(2000,4000,440,480)"
 local LOG_PREFIX     = "[CTC] "
 
 -- ── Helpers ───────────────────────────────────────────────────────────────────
@@ -70,72 +127,7 @@ end
 
 log("Starting CTC — Agent: " .. agent_number .. "  Dest: " .. dest_number)
 
--- ── Phase 1: Originate call to AGENT ─────────────────────────────────────────
--- ignore_early_media=false so we wait for a real 200 OK (true answer)
--- NOT using ignore_early_media=true which would race straight through on ringback
-
-local agent_dial = string.format(
-    "{origination_caller_id_name='%s'," ..
-    "origination_caller_id_number='%s'," ..
-    "ignore_early_media=false," ..
-    "originate_timeout=%d}" ..
-    "sofia/gateway/%s/%s",
-    CID_NAME,
-    CID_NUMBER,
-    AGENT_ANSWER_TIMEOUT,
-    GATEWAY,
-    agent_number
-)
-
-log("Dialing agent leg: " .. agent_dial)
-
--- freeswitch.Session() returns as soon as the outbound leg is "ready" —
--- which happens on early media / ringing too, NOT only on a true answer.
--- (CoreSession:ready() is true during ringback; CoreSession:answered() is
--- the only reliable way to detect a real 200 OK.) Relying on ready() alone
--- caused the destination to be dialed while the agent's phone was still
--- just ringing, making both legs appear to ring "at the same time".
-local agent_session = freeswitch.Session(agent_dial)
-
--- ── Check agent leg exists at all ────────────────────────────────────────────
-if not agent_session or not agent_session:ready() then
-    log_err("Agent leg failed to establish (rejected/no answer) — dest NOT called.")
-    return
-end
-
--- ── Wait for a REAL answer (ignore ringing / early media) ────────────────────
-local agent_timeout_ms = AGENT_ANSWER_TIMEOUT * 1000
-local waited_ms = 0
-local poll_ms    = 200
-while agent_session:ready() and not agent_session:answered() and waited_ms < agent_timeout_ms do
-    freeswitch.msleep(poll_ms)
-    waited_ms = waited_ms + poll_ms
-end
-
-if not agent_session:ready() or not agent_session:answered() then
-    log_err("Agent did not answer within " .. AGENT_ANSWER_TIMEOUT .. "s — dest NOT called.")
-    if agent_session:ready() then
-        agent_session:hangup("NO_ANSWER")
-    end
-    return
-end
-
-log("Agent leg connected. Answering and bridging to destination.")
-
--- Answer the agent leg so audio flows
-agent_session:answer()
-freeswitch.msleep(500)  -- small pause so audio path is stable
-
-log("Agent answered. Now dialing destination: " .. dest_number)
-
--- ── Phase 2: Bridge to DESTINATION ───────────────────────────────────────────
--- Agent hears US ringback (buzz buzz) while destination rings
-
-if not agent_session:ready() then
-    log_err("Agent session dropped before destination could be dialed.")
-    return
-end
-
+-- ── Build the destination dial string (used inside &bridge once agent answers) ─
 local dest_dial = string.format(
     "{origination_caller_id_name='%s'," ..
     "origination_caller_id_number='%s'," ..
@@ -149,26 +141,93 @@ local dest_dial = string.format(
     dest_number
 )
 
--- Tell the agent the call is connecting (best-effort — some FreeSWITCH
--- installs don't have mod_flite; don't let a missing TTS module affect
--- the call flow if it errors)
-pcall(function()
-    agent_session:execute("speak", "flite|kal|Connecting your call now. Please hold.")
-end)
-freeswitch.msleep(1000)
+-- ── Build the agent dial string ─────────────────────────────────────────────
+-- ringback/transfer_ringback: what the agent hears while dest is ringing
+-- (applied natively by the bridge app once it takes over the agent leg).
+--
+-- ignore_early_media=true is REQUIRED here (not false!). For a single-
+-- destination originate, FreeSWITCH considers the call "successful" as soon
+-- as it receives ANY provisional SIP response with SDP (e.g. 183 Session
+-- Progress / early media) UNLESS ignore_early_media=true is set — in which
+-- case it correctly waits for a genuine 200 OK before reporting success.
+-- Confirmed from logs: with ignore_early_media=false, "Originate Resulted
+-- in Success" (and the &bridge(dest) execute) fired the instant 183 early
+-- media arrived, 6+ seconds before the agent's phone was actually answered
+-- — meaning the destination was being dialed while the agent's phone was
+-- still just ringing (both legs appeared to ring "at the same time", and
+-- the resulting bridge connected two mismatched/early media states with no
+-- audio). Setting ignore_early_media=true makes FreeSWITCH itself gate
+-- &bridge(dest) on a true answer, matching the intended Phase 1/Phase 2 flow.
+local agent_dial
+local local_domain = LOCAL_DIDS[agent_number]
 
--- Bridge blocks until one side hangs up
--- ringback variable makes agent hear buzz buzz while dest rings
-agent_session:setVariable("ringback", "%(2000,4000,440,480)")
-agent_session:setVariable("transfer_ringback", "%(2000,4000,440,480)")
-agent_session:execute("bridge", dest_dial)
-
-local hangup_cause = agent_session:hangupCause()
-log("Call ended. Hangup cause: " .. (hangup_cause or "UNKNOWN"))
-
--- ── Cleanup ───────────────────────────────────────────────────────────────────
-if agent_session:ready() then
-    agent_session:hangup("NORMAL_CLEARING")
+if local_domain then
+    -- Local/hairpin DID: route through FusionPBX's own inbound dialplan via
+    -- a loopback channel instead of the gateway. This lands on the exact
+    -- same ring group/extension a real inbound call to this DID would hit,
+    -- with none of the carrier round-trip that broke audio.
+    log("Agent number " .. agent_number .. " is a local DID — routing via loopback into domain "
+        .. local_domain .. " instead of the gateway.")
+    agent_dial = string.format(
+        "{origination_caller_id_name='%s'," ..
+        "origination_caller_id_number='%s'," ..
+        "ignore_early_media=true," ..
+        "originate_timeout=%d," ..
+        "ringback='%s'," ..
+        "transfer_ringback='%s'," ..
+        "hangup_after_bridge=true," ..
+        "domain_name='%s'}" ..
+        "loopback/%s/%s",
+        CID_NAME,
+        CID_NUMBER,
+        AGENT_ANSWER_TIMEOUT,
+        RINGBACK,
+        RINGBACK,
+        local_domain,
+        agent_number,
+        LOCAL_INBOUND_CONTEXT
+    )
+else
+    agent_dial = string.format(
+        "{origination_caller_id_name='%s'," ..
+        "origination_caller_id_number='%s'," ..
+        "ignore_early_media=true," ..
+        "originate_timeout=%d," ..
+        "ringback='%s'," ..
+        "transfer_ringback='%s'," ..
+        "hangup_after_bridge=true}" ..
+        "sofia/gateway/%s/%s",
+        CID_NAME,
+        CID_NUMBER,
+        AGENT_ANSWER_TIMEOUT,
+        RINGBACK,
+        RINGBACK,
+        GATEWAY,
+        agent_number
+    )
 end
 
-log("CTC session complete for agent=" .. agent_number .. " dest=" .. dest_number)
+-- ── Single native originate: dial agent, bridge to dest ONLY on true answer ──
+-- `&bridge(...)` is FreeSWITCH's execute-on-answer mechanism: it only fires
+-- once the agent leg is genuinely answered (a real 200 OK), and it runs the
+-- bridge natively (no Lua session in the media path) — this is what actually
+-- carries audio in both directions. If the agent never answers within
+-- AGENT_ANSWER_TIMEOUT, originate fails and dest is NEVER called.
+local originate_cmd = string.format(
+    "originate %s &bridge(%s)",
+    agent_dial,
+    dest_dial
+)
+
+log("Dialing agent leg: " .. agent_dial)
+
+local api = freeswitch.API()
+local result = api:executeString(originate_cmd)
+
+log("Originate/bridge result: " .. (result or "UNKNOWN"))
+
+if not result or result:sub(1, 3) ~= "+OK" then
+    log_err("CTC failed for agent=" .. agent_number .. " dest=" .. dest_number .. " — result: " .. (result or "nil"))
+else
+    log("CTC call completed for agent=" .. agent_number .. " dest=" .. dest_number)
+end
