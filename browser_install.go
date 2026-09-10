@@ -141,32 +141,41 @@ func RunBrowserInstall(setStatus func(string)) {
 		}
 
 		// Patch all existing Desktop / Start Menu / Taskbar shortcuts that
-		// target this browser. This makes every normal way of opening the
-		// browser load the extension automatically.
+		// target this browser. This still helps on older/non-branded
+		// Chromium builds, but as of Chrome/Edge 137 the --load-extension
+		// command-line switch is ignored by official (branded) builds, so
+		// it can no longer be relied on by itself.
 		patched := findAndPatchBrowserShortcuts(chosen.exePath, loadExtArg)
-
-		if patched > 0 {
-			if !browserRunning {
-				exec.Command(chosen.exePath, "--load-extension="+extDir).Start() //nolint:errcheck
-				setStatus(fmt.Sprintf("Patched %d shortcut(s) — %s opened. Extension will load every time.", patched, chosen.name))
-			} else {
-				setStatus(fmt.Sprintf("Patched %d shortcut(s). Close %s and reopen it — extension will load automatically.", patched, chosen.name))
-			}
-		} else {
-			// No existing shortcuts found — create a new one on the Desktop.
+		if patched == 0 {
+			// No existing shortcuts found — create a new one on the Desktop
+			// as a best-effort fallback for browsers where the switch works.
 			desktop := filepath.Join(os.Getenv("USERPROFILE"), "Desktop")
 			shortcutPath := filepath.Join(desktop, chosen.name+" + FpbxCTC.lnk")
-			if err := createShortcut(shortcutPath, chosen.exePath, loadExtArg, filepath.Dir(chosen.exePath)); err != nil {
-				setStatus("Could not create shortcut: " + err.Error())
-				win.Close()
-				return
-			}
-			if !browserRunning {
-				exec.Command(chosen.exePath, "--load-extension="+extDir).Start() //nolint:errcheck
-				setStatus(fmt.Sprintf("Created '%s' on Desktop — %s opened with extension loaded.", filepath.Base(shortcutPath), chosen.name))
-			} else {
-				setStatus(fmt.Sprintf("Created '%s' on Desktop. Close %s and use that shortcut.", filepath.Base(shortcutPath), chosen.name))
-			}
+			createShortcut(shortcutPath, chosen.exePath, loadExtArg, filepath.Dir(chosen.exePath)) //nolint:errcheck
+		}
+
+		// --load-extension is ignored by modern branded Chrome/Edge builds
+		// (137+), which is why the extension appeared to "not load". Instead,
+		// copy the extension folder path to the clipboard and open the
+		// browser's Extensions page so the user can finish the one-time
+		// "Load unpacked" step themselves.
+		clipErr := copyToClipboard(extDir)
+
+		extURL := extensionsPageURL(chosen.name)
+		if browserRunning {
+			exec.Command(chosen.exePath, extURL).Start() //nolint:errcheck
+		} else {
+			exec.Command(chosen.exePath, extURL, "--load-extension="+extDir).Start() //nolint:errcheck
+		}
+
+		if clipErr == nil {
+			setStatus(fmt.Sprintf(
+				"%s opened to the Extensions page. Turn on Developer mode, click \"Load unpacked\", and paste the path (already copied to your clipboard): %s",
+				chosen.name, extDir))
+		} else {
+			setStatus(fmt.Sprintf(
+				"%s opened to the Extensions page. Turn on Developer mode, click \"Load unpacked\", and select this folder: %s",
+				chosen.name, extDir))
 		}
 		win.Close()
 	})
@@ -179,6 +188,22 @@ func RunBrowserInstall(setStatus func(string)) {
 	win.Add(cancelBtn)
 
 	win.ShowModal() //nolint:errcheck
+}
+
+// extensionsPageURL returns the internal Extensions-management page URL for
+// a given detected browser, so it can be opened directly to the right place
+// for the user to enable Developer mode and click "Load unpacked".
+func extensionsPageURL(browserName string) string {
+	switch browserName {
+	case "Microsoft Edge":
+		return "edge://extensions/"
+	case "Brave":
+		return "brave://extensions/"
+	case "Vivaldi":
+		return "vivaldi://extensions/"
+	default:
+		return "chrome://extensions/"
+	}
 }
 
 // RunBrowserUninstall removes the --load-extension flag from all browser
@@ -462,11 +487,61 @@ func patchShortcut(lnkPath, browserExe, loadExtArg string) (bool, error) {
 }
 
 var (
-	ole32DLL          = windows.NewLazySystemDLL("ole32.dll")
-	procCoInitialize  = ole32DLL.NewProc("CoInitialize")
-	procCoCreateInst  = ole32DLL.NewProc("CoCreateInstance")
+	ole32DLL           = windows.NewLazySystemDLL("ole32.dll")
+	procCoInitialize   = ole32DLL.NewProc("CoInitialize")
+	procCoCreateInst   = ole32DLL.NewProc("CoCreateInstance")
 	procCoUninitialize = ole32DLL.NewProc("CoUninitialize")
+
+	procOpenClipboard    = user32DLL.NewProc("OpenClipboard")
+	procCloseClipboard   = user32DLL.NewProc("CloseClipboard")
+	procEmptyClipboard   = user32DLL.NewProc("EmptyClipboard")
+	procSetClipboardData = user32DLL.NewProc("SetClipboardData")
+
+	kernel32DLL      = windows.NewLazySystemDLL("kernel32.dll")
+	procGlobalAlloc  = kernel32DLL.NewProc("GlobalAlloc")
+	procGlobalLock   = kernel32DLL.NewProc("GlobalLock")
+	procGlobalUnlock = kernel32DLL.NewProc("GlobalUnlock")
 )
+
+const (
+	cfUnicodeText = 13
+	gmemMoveable  = 0x0002
+)
+
+// copyToClipboard places text on the Windows clipboard as CF_UNICODETEXT so
+// the user can paste the extension folder path into the browser's "Load
+// unpacked" folder picker.
+func copyToClipboard(text string) error {
+	utf16, err := syscall.UTF16FromString(text)
+	if err != nil {
+		return err
+	}
+	size := uintptr(len(utf16)) * unsafe.Sizeof(uint16(0))
+
+	hMem, _, _ := procGlobalAlloc.Call(gmemMoveable, size)
+	if hMem == 0 {
+		return fmt.Errorf("GlobalAlloc failed")
+	}
+
+	ptr, _, _ := procGlobalLock.Call(hMem)
+	if ptr == 0 {
+		return fmt.Errorf("GlobalLock failed")
+	}
+	dst := unsafe.Slice((*uint16)(unsafe.Pointer(ptr)), len(utf16))
+	copy(dst, utf16)
+	procGlobalUnlock.Call(hMem) //nolint:errcheck
+
+	if r, _, _ := procOpenClipboard.Call(0); r == 0 {
+		return fmt.Errorf("OpenClipboard failed")
+	}
+	defer procCloseClipboard.Call()
+
+	procEmptyClipboard.Call() //nolint:errcheck
+	if r, _, _ := procSetClipboardData.Call(cfUnicodeText, hMem); r == 0 {
+		return fmt.Errorf("SetClipboardData failed")
+	}
+	return nil
+}
 
 // createShortcut writes a .lnk file at lnkPath pointing to targetExe with the
 // given command-line arguments and working directory.
