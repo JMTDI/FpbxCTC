@@ -39,7 +39,7 @@ func main() {
 
 	// ── Native messaging mode: Chrome/Edge/Brave launched us ─────────────────
 	// The browser passes the calling extension's origin as the sole argument,
-	// e.g. "chrome-extension://mbabhkdiiiceedngdpgbifgnabaaboeb/"
+	// e.g. "chrome-extension://dicdjpbfhifgdnhgbbbnbenocgeegjij/"
 	// It does NOT pass --native-messaging; we detect by the URL scheme.
 	if len(args) >= 1 && strings.HasPrefix(strings.ToLower(args[0]), "chrome-extension://") {
 		handleNativeMessaging()

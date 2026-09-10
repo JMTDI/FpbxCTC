@@ -36,6 +36,21 @@ jobs:
         with:
           go-version: '1.22'
 
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo tools
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-installrs-${{ hashFiles('installer/Cargo.toml') }}
+
+      - name: Install InstallRS CLI
+        shell: pwsh
+        run: cargo install installrs --locked
+
       - name: Update version numbers
         shell: pwsh
         run: |
@@ -95,10 +110,15 @@ jobs:
       - name: Build FpbxCTC.exe
         run: go build -ldflags "-H windowsgui -s -w -X main.Version=${{ inputs.version }}" -o FpbxCTC.exe .
 
-      - name: Package release archive
+      - name: Stage installer payload
         shell: pwsh
         run: |
-          Compress-Archive -Path FpbxCTC.exe, browser-extension -DestinationPath "FpbxCTC-${{ inputs.version }}.zip" -Force
+          Copy-Item -Path FpbxCTC.exe -Destination installer\FpbxCTC.exe -Force
+          Copy-Item -Path FpbxCTC.ico -Destination installer\FpbxCTC.ico -Force
+          Copy-Item -Path browser-extension -Destination installer\browser-extension -Recurse -Force
+
+      - name: Build FpbxCTC-Setup.exe with InstallRS
+        run: installrs build installer --output FpbxCTC-Setup.exe
 
       - name: Create and push tag
         shell: pwsh
@@ -114,5 +134,4 @@ jobs:
           name: v${{ inputs.version }}
           generate_release_notes: true
           files: |
-            FpbxCTC.exe
-            FpbxCTC-${{ inputs.version }}.zip
+            FpbxCTC-Setup.exe
