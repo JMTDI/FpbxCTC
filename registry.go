@@ -201,9 +201,18 @@ func registerNMHostOnly() error {
 // nmHostName is the identifier used in the NM manifest and registry.
 const nmHostName = "com.fpbxctc.host"
 
-// nmExtensionID is the fixed Chrome/Edge extension ID derived from the
-// public key in manifest.json.
-const nmExtensionID = "chrome-extension://mbabhkdiiiceedngdpgbifgnabaaboeb/"
+// nmExtensionID is the fixed Chrome/Edge extension ID.
+//
+// manifest.json intentionally has no "key" field: Microsoft Edge can fail to
+// load unpacked extensions that ship a Chrome-generated "key" (the extension
+// shows as corrupted / refuses to load), so relying on it broke Edge support.
+// Without "key", Chromium-based browsers (Chrome, Edge, Brave, Vivaldi all
+// share the same extensions code) derive the ID deterministically from the
+// lower-cased absolute path of the unpacked extension folder. Since the
+// installer always places the extension at the same fixed path
+// (C:\Program Files\FpbxCTC\browser-extension), the resulting ID below is
+// stable across every supported browser and every install.
+const nmExtensionID = "chrome-extension://dicdjpbfhifgdnhgbbbnbenocgeegjij/"
 
 type nmManifest struct {
 	Name           string   `json:"name"`
