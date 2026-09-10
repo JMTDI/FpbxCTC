@@ -3,4 +3,4 @@ package main
 // Version is the application version. It is overridden at build time via
 // `-ldflags "-X main.Version=x.y.z"` by the release workflow
 // (.github/workflows/build.yml). Defaults to "dev" for local builds.
-var Version = "dev"
+var Version = "2.0.0"
