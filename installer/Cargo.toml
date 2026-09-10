@@ -1,6 +1,6 @@
 [package]
 name = "fpbxctc-installer"
-version = "2.0.0"
+version = "3.0.0"
 edition = "2021"
 
 [lib]
@@ -16,6 +16,6 @@ mslnk = "0.1"
 gui = true
 execution-level = "requireAdministrator"
 product-name = "FpbxCTC"
-file-version = "2.0.0.0"
+file-version = "3.0.0.0"
 legal-copyright = "Copyright (c) 2026 FpbxCTC"
 icon = "FpbxCTC.ico"
