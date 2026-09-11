@@ -103,8 +103,15 @@ and leave the checked-in version with the placeholder/empty table.
    - Creates a Start Menu shortcut
 3. Launch **FpbxCTC** from the Start Menu
 4. Fill in **Domain**, **API Key**, **Agent Number** and click **Save Settings**
-5. Click **Install Browser Extension** → pick your browser → restart it
-6. The extension loads automatically; click **Sync from Desktop App** in the popup to copy your settings
+5. Click **Install Browser Extension** → pick your browser
+6. On the Extensions page, turn on **Developer mode**, click **Load unpacked**, and select the extension folder that opens automatically
+7. Click **Sync from Desktop App** in the extension popup to copy your settings
+
+Modern branded Chrome and Edge builds do not permit applications to silently
+load unpacked extensions. The installer opens the Extensions page and the
+correct extension folder; Edge requires the one-time **Load unpacked**
+confirmation. Browser-install diagnostics are written to
+`%APPDATA%\FpbxCTC\browser-install.log`.
 
 ---
 

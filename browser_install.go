@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"github.com/gonutz/wui/v2"
@@ -19,6 +20,22 @@ import (
 type browser struct {
 	name    string
 	exePath string
+}
+
+func browserInstallLogPath() string {
+	return filepath.Join(configDir(), "browser-install.log")
+}
+
+func logBrowserInstall(format string, args ...any) {
+	if err := os.MkdirAll(configDir(), 0o700); err != nil {
+		return
+	}
+	f, err := os.OpenFile(browserInstallLogPath(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	fmt.Fprintf(f, "%s "+format+"\n", append([]any{time.Now().Format(time.RFC3339)}, args...)...)
 }
 
 // detectBrowsers searches well-known registry paths for Chromium-based
@@ -47,12 +64,15 @@ func detectBrowsers() []browser {
 			k.Close()
 			path = strings.Trim(strings.TrimSpace(path), `"`)
 			if err != nil || path == "" {
+				logBrowserInstall("%s registry entry is empty or invalid: %v", c.name, err)
 				continue
 			}
 			if _, err := os.Stat(path); err != nil {
+				logBrowserInstall("%s registry path unavailable: %s: %v", c.name, path, err)
 				continue
 			}
 			found = append(found, browser{name: c.name, exePath: path})
+			logBrowserInstall("Detected %s from registry: %s", c.name, path)
 			foundInRegistry = true
 			break // don't add the same browser twice
 		}
@@ -63,6 +83,7 @@ func detectBrowsers() []browser {
 			for _, path := range edgeExecutablePaths() {
 				if _, err := os.Stat(path); err == nil {
 					found = append(found, browser{name: c.name, exePath: path})
+					logBrowserInstall("Detected Microsoft Edge from fallback path: %s", path)
 					break
 				}
 			}
@@ -82,12 +103,14 @@ func edgeExecutablePaths() []string {
 }
 
 // RunBrowserInstall opens a picker window listing installed Chromium-based
-// browsers. When the user clicks "Install", the selected browser is launched
-// with --load-extension pointing at the bundled browser-extension folder.
+// browsers. It opens the selected browser's Extensions page and the bundled
+// extension folder for the user-confirmed unpacked installation step.
 // Progress / errors are reported via setStatus (called on the GUI thread).
 func RunBrowserInstall(setStatus func(string)) {
+	logBrowserInstall("Browser extension install started")
 	browsers := detectBrowsers()
 	if len(browsers) == 0 {
+		logBrowserInstall("No supported browser detected")
 		setStatus("No supported browser detected (Chrome, Edge, Brave, Vivaldi).")
 		return
 	}
@@ -122,7 +145,7 @@ func RunBrowserInstall(setStatus func(string)) {
 	}
 
 	noteLabel := wui.NewLabel()
-	noteLabel.SetText("Patches your existing browser shortcuts so the extension loads automatically every time.")
+	noteLabel.SetText("Edge requires one manual Load unpacked step. The extension folder will open for you.")
 	noteLabel.SetBounds(12, 50+len(browsers)*32, 390, 36)
 	win.Add(noteLabel)
 
@@ -138,68 +161,63 @@ func RunBrowserInstall(setStatus func(string)) {
 			}
 		}
 		chosen := browsers[idx]
+		logBrowserInstall("Selected %s: %s", chosen.name, chosen.exePath)
 
 		exe, err := os.Executable()
 		if err != nil {
+			logBrowserInstall("Cannot locate application executable: %v", err)
 			setStatus("Cannot locate executable: " + err.Error())
 			win.Close()
 			return
 		}
 		extDir := filepath.Join(filepath.Dir(exe), "browser-extension")
 		if _, err := os.Stat(extDir); os.IsNotExist(err) {
+			logBrowserInstall("Extension folder missing: %s", extDir)
 			setStatus(fmt.Sprintf("browser-extension folder not found at: %s", extDir))
 			win.Close()
 			return
 		}
 
-		exeName := strings.ToLower(filepath.Base(chosen.exePath))
-		out, _ := exec.Command("tasklist", "/FI", "IMAGENAME eq "+exeName, "/NH", "/FO", "CSV").Output()
-		browserRunning := strings.Contains(strings.ToLower(string(out)), exeName)
-
-		loadExtArg := `--load-extension="` + extDir + `"`
-
 		// Register the Native Messaging host so the extension can sync settings.
 		if regErr := registerNMHostOnly(); regErr != nil {
+			logBrowserInstall("Native messaging registration failed: %v", regErr)
 			setStatus("Warning: could not register native messaging host: " + regErr.Error())
-			// non-fatal — continue with shortcut patching
+		} else {
+			logBrowserInstall("Native messaging host registered")
 		}
 
-		// Patch all existing Desktop / Start Menu / Taskbar shortcuts that
-		// target this browser. This still helps on older/non-branded
-		// Chromium builds, but as of Chrome/Edge 137 the --load-extension
-		// command-line switch is ignored by official (branded) builds, so
-		// it can no longer be relied on by itself.
-		patched := findAndPatchBrowserShortcuts(chosen.exePath, loadExtArg)
-		if patched == 0 {
-			// No existing shortcuts found — create a new one on the Desktop
-			// as a best-effort fallback for browsers where the switch works.
-			desktop := filepath.Join(os.Getenv("USERPROFILE"), "Desktop")
-			shortcutPath := filepath.Join(desktop, chosen.name+" + FpbxCTC.lnk")
-			createShortcut(shortcutPath, chosen.exePath, loadExtArg, filepath.Dir(chosen.exePath)) //nolint:errcheck
-		}
-
-		// --load-extension is ignored by modern branded Chrome/Edge builds
-		// (137+), which is why the extension appeared to "not load". Instead,
-		// copy the extension folder path to the clipboard and open the
-		// browser's Extensions page so the user can finish the one-time
-		// "Load unpacked" step themselves.
+		// Branded Chrome and Edge intentionally ignore --load-extension.
+		// Opening the folder and extensions page enables Edge's supported,
+		// user-confirmed unpacked extension installation flow.
 		clipErr := copyToClipboard(extDir)
+		if clipErr != nil {
+			logBrowserInstall("Could not copy extension path to clipboard: %v", clipErr)
+		} else {
+			logBrowserInstall("Copied extension path to clipboard: %s", extDir)
+		}
 
 		extURL := extensionsPageURL(chosen.name)
-		if browserRunning {
-			exec.Command(chosen.exePath, extURL).Start() //nolint:errcheck
+		if err := exec.Command(chosen.exePath, extURL).Start(); err != nil {
+			logBrowserInstall("Could not open %s: %v", extURL, err)
+			setStatus(fmt.Sprintf("Could not open %s: %v. Log: %s", chosen.name, err, browserInstallLogPath()))
+			win.Close()
+			return
+		}
+		logBrowserInstall("Opened %s", extURL)
+		if err := exec.Command("explorer.exe", extDir).Start(); err != nil {
+			logBrowserInstall("Could not open extension folder %s: %v", extDir, err)
 		} else {
-			exec.Command(chosen.exePath, extURL, "--load-extension="+extDir).Start() //nolint:errcheck
+			logBrowserInstall("Opened extension folder: %s", extDir)
 		}
 
 		if clipErr == nil {
 			setStatus(fmt.Sprintf(
-				"%s opened to the Extensions page. Turn on Developer mode, click \"Load unpacked\", and paste the path (already copied to your clipboard): %s",
-				chosen.name, extDir))
+				"%s and extension folder opened. Turn on Developer mode, click \"Load unpacked\", select the opened folder. Log: %s",
+				chosen.name, browserInstallLogPath()))
 		} else {
 			setStatus(fmt.Sprintf(
-				"%s opened to the Extensions page. Turn on Developer mode, click \"Load unpacked\", and select this folder: %s",
-				chosen.name, extDir))
+				"%s and extension folder opened. Turn on Developer mode, click \"Load unpacked\", then select the folder. Log: %s",
+				chosen.name, browserInstallLogPath()))
 		}
 		win.Close()
 	})
