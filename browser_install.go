@@ -120,7 +120,7 @@ func RunBrowserInstall(setStatus func(string)) {
 	win := wui.NewWindow()
 	win.SetTitle("Install Browser Extension")
 	win.SetWidth(420)
-	win.SetHeight(200 + len(browsers)*32)
+	win.SetHeight(276 + len(browsers)*32)
 	win.SetHasMaxButton(false)
 	if font != nil {
 		win.SetFont(font)
@@ -145,13 +145,23 @@ func RunBrowserInstall(setStatus func(string)) {
 	}
 
 	noteLabel := wui.NewLabel()
-	noteLabel.SetText("Edge requires one manual Load unpacked step. The extension folder will open for you.")
+	noteLabel.SetText("For Edge sync: after Load unpacked, paste its ID below and click Install again.")
 	noteLabel.SetBounds(12, 50+len(browsers)*32, 390, 36)
 	win.Add(noteLabel)
 
+	edgeIDLabel := wui.NewLabel()
+	edgeIDLabel.SetText("Edge extension ID (optional):")
+	edgeIDLabel.SetBounds(12, 90+len(browsers)*32, 390, 20)
+	win.Add(edgeIDLabel)
+
+	edgeIDEdit := wui.NewEditLine()
+	edgeIDEdit.SetText(savedEdgeExtensionID())
+	edgeIDEdit.SetBounds(12, 112+len(browsers)*32, 390, 26)
+	win.Add(edgeIDEdit)
+
 	installBtn := wui.NewButton()
 	installBtn.SetText("Install Extension")
-	installBtn.SetBounds(12, 100+len(browsers)*32, 192, 32)
+	installBtn.SetBounds(12, 156+len(browsers)*32, 192, 32)
 	installBtn.SetOnClick(func() {
 		idx := 0
 		for i, rb := range radios {
@@ -162,6 +172,14 @@ func RunBrowserInstall(setStatus func(string)) {
 		}
 		chosen := browsers[idx]
 		logBrowserInstall("Selected %s: %s", chosen.name, chosen.exePath)
+		if chosen.name == "Microsoft Edge" && strings.TrimSpace(edgeIDEdit.Text()) != "" {
+			if err := saveEdgeExtensionID(edgeIDEdit.Text()); err != nil {
+				logBrowserInstall("Invalid Edge extension ID: %v", err)
+				setStatus("Cannot register Edge ID: " + err.Error())
+				return
+			}
+			logBrowserInstall("Saved Edge extension ID for native messaging")
+		}
 
 		exe, err := os.Executable()
 		if err != nil {
@@ -225,7 +243,7 @@ func RunBrowserInstall(setStatus func(string)) {
 
 	cancelBtn := wui.NewButton()
 	cancelBtn.SetText("Cancel")
-	cancelBtn.SetBounds(214, 100+len(browsers)*32, 192, 32)
+	cancelBtn.SetBounds(214, 156+len(browsers)*32, 192, 32)
 	cancelBtn.SetOnClick(func() { win.Close() })
 	win.Add(cancelBtn)
 

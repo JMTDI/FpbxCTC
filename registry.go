@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"golang.org/x/sys/windows/registry"
 )
@@ -214,6 +215,8 @@ const nmHostName = "com.fpbxctc.host"
 // stable across every supported browser and every install.
 const nmExtensionID = "chrome-extension://dicdjpbfhifgdnhgbbbnbenocgeegjij/"
 
+const edgeExtensionIDFile = "edge-extension-id.txt"
+
 type nmManifest struct {
 	Name           string   `json:"name"`
 	Description    string   `json:"description"`
@@ -232,6 +235,43 @@ func nmInstalledExe() string {
 	return filepath.Join(pf, "FpbxCTC", "FpbxCTC.exe")
 }
 
+func edgeExtensionIDPath() string {
+	return filepath.Join(configDir(), edgeExtensionIDFile)
+}
+
+func savedEdgeExtensionID() string {
+	data, err := os.ReadFile(edgeExtensionIDPath())
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+func saveEdgeExtensionID(id string) error {
+	id = strings.TrimSpace(strings.TrimPrefix(id, "chrome-extension://"))
+	id = strings.TrimSuffix(id, "/")
+	if len(id) != 32 {
+		return fmt.Errorf("Edge extension ID must be 32 characters")
+	}
+	for _, char := range id {
+		if char < 'a' || char > 'p' {
+			return fmt.Errorf("Edge extension ID contains invalid characters")
+		}
+	}
+	if err := os.MkdirAll(configDir(), 0o700); err != nil {
+		return fmt.Errorf("create config directory: %w", err)
+	}
+	return os.WriteFile(edgeExtensionIDPath(), []byte(id+"\n"), 0o600)
+}
+
+func nativeMessagingOrigins() []string {
+	origins := []string{nmExtensionID}
+	if id := savedEdgeExtensionID(); id != "" {
+		origins = append(origins, "chrome-extension://"+id+"/")
+	}
+	return origins
+}
+
 func writeNativeMessagingHost(exeFullPath string) error {
 	// Always prefer the installed exe so that the NM host path is stable
 	// even when the user runs the dev build to reconfigure settings.
@@ -246,7 +286,7 @@ func writeNativeMessagingHost(exeFullPath string) error {
 		Description:    "FpbxCTC native messaging host",
 		Path:           exeFullPath,
 		Type:           "stdio",
-		AllowedOrigins: []string{nmExtensionID},
+		AllowedOrigins: nativeMessagingOrigins(),
 	}
 
 	// Write manifest JSON to %APPDATA%\FpbxCTC\

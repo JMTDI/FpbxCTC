@@ -113,6 +113,15 @@ correct extension folder; Edge requires the one-time **Load unpacked**
 confirmation. Browser-install diagnostics are written to
 `%APPDATA%\FpbxCTC\browser-install.log`.
 
+### Edge native messaging setup
+
+After loading the extension in Edge, `edge://extensions` shows the extension's
+32-character **ID** while Developer mode is enabled. Copy that ID, open
+**Install Browser Extension** in FpbxCTC again, select **Microsoft Edge**,
+paste it into **Edge extension ID**, and click **Install Extension**. This
+adds Edge's actual extension origin to the native-messaging manifest, allowing
+**Sync from Desktop App** to work.
+
 ---
 
 ## Browser extension — load unpacked (dev)
