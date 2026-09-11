@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "FpbxCTC",
-  "version": "3.3.1",
+  "version": "4.0.0",
   "description": "FreePBX Click-to-Call — right-click any selected phone number to dial via your PBX.",
 
   "permissions": ["contextMenus", "storage", "notifications", "nativeMessaging"],
