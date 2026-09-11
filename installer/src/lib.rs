@@ -60,7 +60,7 @@ pub fn install(i: &mut Installer) -> Result<()> {
         let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
         let (key, _) = hklm.create_subkey_with_flags(UNINSTALL_REG, KEY_ALL_ACCESS)?;
         key.set_value("DisplayName", &"FpbxCTC")?;
-        key.set_value("DisplayVersion", &"3.0.0")?;
+        key.set_value("DisplayVersion", &"3.1.0")?;
         key.set_value("Publisher", &"FpbxCTC")?;
         key.set_value("DisplayIcon", &format!(r"{}\FpbxCTC.exe,0", INSTALL_DIR))?;
         key.set_value("InstallLocation", &INSTALL_DIR)?;
