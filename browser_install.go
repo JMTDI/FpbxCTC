@@ -36,6 +36,7 @@ func detectBrowsers() []browser {
 
 	var found []browser
 	for _, c := range candidates {
+		foundInRegistry := false
 		// Try HKLM then HKCU so per-user installs are also detected.
 		for _, root := range []registry.Key{registry.LOCAL_MACHINE, registry.CURRENT_USER} {
 			k, err := registry.OpenKey(root, c.regPath, registry.QUERY_VALUE)
@@ -44,6 +45,7 @@ func detectBrowsers() []browser {
 			}
 			path, _, err := k.GetStringValue("")
 			k.Close()
+			path = strings.Trim(strings.TrimSpace(path), `"`)
 			if err != nil || path == "" {
 				continue
 			}
@@ -51,10 +53,32 @@ func detectBrowsers() []browser {
 				continue
 			}
 			found = append(found, browser{name: c.name, exePath: path})
+			foundInRegistry = true
 			break // don't add the same browser twice
+		}
+
+		// Edge can be installed per-user without an App Paths entry. Probe its
+		// documented machine and per-user locations as a fallback.
+		if c.name == "Microsoft Edge" && !foundInRegistry {
+			for _, path := range edgeExecutablePaths() {
+				if _, err := os.Stat(path); err == nil {
+					found = append(found, browser{name: c.name, exePath: path})
+					break
+				}
+			}
 		}
 	}
 	return found
+}
+
+func edgeExecutablePaths() []string {
+	var result []string
+	for _, root := range []string{"ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"} {
+		if base := os.Getenv(root); base != "" {
+			result = append(result, filepath.Join(base, "Microsoft", "Edge", "Application", "msedge.exe"))
+		}
+	}
+	return result
 }
 
 // RunBrowserInstall opens a picker window listing installed Chromium-based
